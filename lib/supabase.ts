@@ -25,6 +25,35 @@ function showNotification(message: string, type: 'error' | 'success' = 'error') 
   console[type === 'error' ? 'error' : 'log'](message);
 }
 
+// 创建一个安全的 supabase 包装器，当 supabase 为 null 时不会崩溃
+const safeSupabase = supabase || {
+  auth: {
+    signUp: () => Promise.reject(new Error('Supabase 未配置，请在 Vercel 添加环境变量 VITE_SUPABASE_URL 和 VITE_SUPABASE_PUBLISHABLE_KEY')),
+    signInWithPassword: () => Promise.reject(new Error('Supabase 未配置，请在 Vercel 添加环境变量 VITE_SUPABASE_URL 和 VITE_SUPABASE_PUBLISHABLE_KEY')),
+    signOut: () => Promise.reject(new Error('Supabase 未配置')),
+    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    updateUser: () => Promise.reject(new Error('Supabase 未配置')),
+  },
+  from: () => ({
+    select: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    insert: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
+    update: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
+    delete: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
+    eq: () => ({
+      select: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
+      single: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
+    }),
+    order: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    ilike: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    gte: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    lte: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    or: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    not: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    range: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
+    single: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
+  }),
+};
+
 // ============================================
 // 认证相关函数
 // ============================================
