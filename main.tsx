@@ -1,9 +1,9 @@
-import React, { useEffect, useState, Suspense, lazy, Component, ReactNode } from 'react';
+import React, { useEffect, useState, useRef, Suspense, lazy, Component, ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ConfigProvider, Spin, Button, Result } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { getCurrentUser, User } from './lib/supabase';
+import { getCurrentUser, User, supabase } from './lib/supabase';
 import MainLayout from './layouts';
 
 // 懒加载路由页面，减小首屏 bundle
@@ -87,22 +87,24 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(true);
+  const checkingRef = useRef(true);
   const location = useLocation();
+
+  // 保持 ref 与 state 同步，避免闭包问题
+  useEffect(() => {
+    checkingRef.current = checking;
+  }, [checking]);
 
   useEffect(() => {
     let isMounted = true;
     let timeoutId: ReturnType<typeof setTimeout>;
-    
+    let authSubscription: { subscription: { unsubscribe: () => void } } | null = null;
+
     const checkAuth = async () => {
       try {
         const user: User | null = await getCurrentUser();
-        
         if (isMounted) {
-          if (user) {
-            setAuthenticated(true);
-          } else {
-            setAuthenticated(false);
-          }
+          setAuthenticated(!!user);
         }
       } catch (error) {
         console.error('[AuthGuard] 认证检查失败:', error);
@@ -115,21 +117,37 @@ const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         }
       }
     };
-    
+
     // 添加超时保护：如果 10 秒内认证检查未完成，自动设置为未认证
     timeoutId = setTimeout(() => {
-      if (isMounted && checking) {
+      if (isMounted && checkingRef.current) {
         console.warn('[AuthGuard] 认证检查超时');
         setChecking(false);
         setAuthenticated(false);
       }
     }, 10000);
-    
+
+    // 监听 Supabase 认证状态变化（token 刷新、登出等）
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        console.log('[AuthGuard] auth state change:', event);
+        if (isMounted) {
+          if (event === 'SIGNED_OUT') {
+            setAuthenticated(false);
+          } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+            setAuthenticated(!!session);
+          }
+        }
+      });
+      authSubscription = data;
+    }
+
     checkAuth();
-    
+
     return () => {
       isMounted = false;
       clearTimeout(timeoutId);
+      authSubscription?.subscription.unsubscribe();
     };
   }, []);
 

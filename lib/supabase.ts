@@ -167,7 +167,9 @@ export async function getCurrentUser(): Promise<User | null> {
       console.warn('[getCurrentUser] 获取用户资料失败:', profileError.message);
     }
 
-    return profile ? { ...session.user, ...profile } : null;
+    // 关键修复：即使 profile 查询失败或不存在，只要有 session 就返回用户
+    // 避免因为 user_profiles 表缺失/RLS 策略问题导致已登录用户被踢出
+    return { ...session.user, ...profile } as User;
   } catch (error) {
     console.error('[getCurrentUser] 异常:', error);
     return null;
