@@ -1,0 +1,9 @@
+# SPA 路由重定向：所有路径都返回 index.html
+# Cloudflare Pages 用这个文件处理客户端路由
+# https://developers.cloudflare.com/pages/platform/files/#_redirects
+
+# 静态资源直接返回
+/assets/*  /assets/:splat  200
+
+# SPA fallback：所有非文件请求都指向 index.html
+/*  /index.html  200

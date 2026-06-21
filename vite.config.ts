@@ -16,5 +16,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'antd-vendor': ['antd', '@ant-design/icons'],
+          'supabase': ['@supabase/supabase-js'],
+          'utils': ['xlsx', 'file-saver', 'axios', 'moment'],
+        },
+      },
+    },
   },
 });

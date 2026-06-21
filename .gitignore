@@ -1,19 +1,48 @@
-# Auto detect text files and perform LF normalization
-* text=auto
-
-# Dependencies
+# ===== 依赖 =====
 node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
 
-# Build output
-dist/
-build/
-*.tsbuildinfo
-
-# Environment
+# ===== 环境变量（含 Supabase Key，禁止提交！）=====
 .env
 .env.local
-.env.*.local
+.env.production
+.env.development
 
-# OS
+# ===== 构建产物 =====
+dist/
+build/
+out/
+
+# ===== Vite 缓存 =====
+node_modules/.vite/
+node_modules/.cache/
+*.local
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== 日志 =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== 系统文件 =====
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ===== IDE =====
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== 临时文件 =====
+*.bak
+*.tmp
+*.temp
