@@ -298,13 +298,15 @@ const InboundPage: React.FC = () => {
 
   const handleDownloadTemplate = () => {
     downloadTemplate([
-      { key: 'order_no', label: '入库单号' },
-      { key: 'supplier_id', label: '供应商ID' },
-      { key: 'operator', label: '操作人' },
-      { key: 'status', label: '状态' },
+      { key: 'material_code', label: '物资编码' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'quantity', label: '数量' },
+      { key: 'unit', label: '单位' },
+      { key: 'unit_price', label: '单价(元)' },
+      { key: 'supplier_name', label: '供应商' },
       { key: 'remark', label: '备注' },
     ], '入库记录导入模板');
-    message.success('模板下载成功');
+    message.success('模板下载成功，入库单号由系统自动生成');
   };
 
   const readFileText = (file: File): Promise<string> => {
@@ -321,19 +323,91 @@ const InboundPage: React.FC = () => {
     try {
       const text = await readFileText(selectedFile);
       const rows = csvToObjects(text, [
-        { key: 'order_no', label: '入库单号' },
-        { key: 'supplier_id', label: '供应商ID' },
-        { key: 'operator', label: '操作人' },
-        { key: 'status', label: '状态' },
+        { key: 'material_code', label: '物资编码' },
+        { key: 'material_name', label: '物资名称' },
+        { key: 'quantity', label: '数量' },
+        { key: 'unit', label: '单位' },
+        { key: 'unit_price', label: '单价(元)' },
+        { key: 'supplier_name', label: '供应商' },
         { key: 'remark', label: '备注' },
       ]);
       if (rows.length === 0) { message.error('文件中没有有效数据'); return; }
-      const { error } = await supabase
-        .from('inbound_orders')
-        .insert(rows.map((item: any) => ({ ...item, status: item.status || 'draft' })));
-      if (error) throw error;
-      message.success(`成功导入 ${rows.length} 条入库记录`);
+
+      // 按供应商名称分组
+      const supplierGroups = new Map<string, any[]>();
+      for (const row of rows) {
+        const supplierName = String(row.supplier_name || '').trim();
+        if (!supplierName) continue;
+        if (!supplierGroups.has(supplierName)) {
+          supplierGroups.set(supplierName, []);
+        }
+        supplierGroups.get(supplierName)!.push(row);
+      }
+
+      if (supplierGroups.size === 0) {
+        message.error('文件中缺少供应商信息');
+        return;
+      }
+
+      message.loading({ content: `正在导入 ${supplierGroups.size} 个供应商的入库单...`, key: 'import-inbound', duration: 0 });
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const [supplierName, items] of supplierGroups) {
+        try {
+          // 查找供应商ID
+          const supplier = suppliers.find(s => s.name === supplierName);
+          if (!supplier) {
+            throw new Error(`供应商"${supplierName}"未找到，请先在供应商管理中创建`);
+          }
+
+          // 解析物资明细
+          const orderItems: any[] = [];
+          for (const item of items) {
+            const materialCode = String(item.material_code || '').trim();
+            const materialName = String(item.material_name || '').trim();
+            const material = materials.find(m =>
+              (materialCode && m.code === materialCode) ||
+              (materialName && m.name === materialName)
+            );
+            if (!material) {
+              throw new Error(`物资"${materialName}"(${materialCode})未找到，请先在物资档案中创建`);
+            }
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.unit_price) || 0;
+            if (qty <= 0) {
+              throw new Error(`物资"${material.name}"的数量必须大于0`);
+            }
+            orderItems.push({
+              material_id: material.id,
+              quantity: qty,
+              unit_price: price,
+              total_amount: qty * price,
+            });
+          }
+
+          // 创建入库单（入库单号由系统自动生成）
+          await createInboundOrder({
+            supplier_id: supplier.id,
+            operator: currentUser?.full_name || '系统导入',
+            remark: items[0]?.remark || '',
+            items: orderItems,
+          });
+          successCount++;
+        } catch (e: any) {
+          failCount++;
+          console.error(`导入供应商"${supplierName}"失败:`, e.message);
+          message.error(`供应商"${supplierName}"导入失败: ${e.message}`);
+        }
+      }
+
+      message.success({
+        content: `导入完成：成功 ${successCount} 单${failCount > 0 ? `，失败 ${failCount} 单` : ''}`,
+        key: 'import-inbound',
+        duration: 3,
+      });
       setImportModalOpen(false);
+      setSelectedFile(null);
       fetchData();
     } catch (error: any) {
       message.error(error.message || '导入失败');
@@ -667,7 +741,14 @@ const InboundPage: React.FC = () => {
       >
         <Alert
           message="导入说明"
-          description="1. 请先下载导入模板 2. 按照模板格式填写数据 3. CSV 文件请使用 UTF-8 编码"
+          description={
+            <>
+              1. 请先下载导入模板，按照模板格式填写数据<br />
+              2. CSV 文件请使用 UTF-8 编码，物资编码和物资名称至少填一项<br />
+              3. 同一供应商的多行物资将自动合并为一个入库单<br />
+              4. 入库单号由系统自动生成，无需填写
+            </>
+          }
           type="info" showIcon style={{ marginBottom: 16 }}
         />
         <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate} style={{ marginBottom: 16 }}>下载导入模板</Button>
