@@ -1,10 +1,30 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, message, Tag, Typography, Popconfirm, Upload, Alert, DatePicker } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, supabase } from '@/lib/supabase';
 import { downloadCSV, downloadTemplate, csvToObjects } from '@/lib/importExport';
 
 const { Title } = Typography;
+
+// 导出/导入列定义常量（消除重复定义）
+const SUPPLIER_COLUMNS = [
+  { key: 'name', label: '供应商名称' },
+  { key: 'contact_person', label: '联系人' },
+  { key: 'phone', label: '联系电话' },
+  { key: 'email', label: '邮箱' },
+  { key: 'address', label: '地址' },
+];
+
+// 允许导入的字段白名单（防止 CSV 注入额外字段）
+const IMPORT_ALLOWED_KEYS = SUPPLIER_COLUMNS.map(col => col.key);
+
+// 安全日期格式化
+const formatSafeDate = (date: string | null | undefined): string => {
+  if (!date) return '-';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '-';
+  return d.toLocaleString();
+};
 
 const SuppliersPage: React.FC = () => {
   const [data, setData] = useState<any[]>([]);
@@ -34,7 +54,6 @@ const SuppliersPage: React.FC = () => {
         total: result?.total || 0,
       });
     } catch (error: any) {
-      console.error('获取数据失败:', error);
       message.error('获取数据失败');
     } finally {
       setLoading(false);
@@ -55,16 +74,14 @@ const SuppliersPage: React.FC = () => {
   const handleEdit = (record: any) => { setEditingId(record.id); form.setFieldsValue(record); setModalOpen(true); };
 
   const handleDelete = async (id: number) => {
-    try { 
-      await deleteSupplier(id); 
-      message.success('删除成功'); 
-      fetchData(); 
+    try {
+      await deleteSupplier(id);
+      message.success('删除成功');
+      fetchData();
     }
-    catch (error: any) { 
-      console.error('删除供应商失败:', error);
+    catch (error: any) {
       const errorMessage = error?.message || error?.hint || '删除失败';
-      
-      // 如果是外键约束错误，给出友好提示
+
       if (errorMessage.includes('foreign key constraint') || errorMessage.includes('delete on table')) {
         message.warning('该供应商已被其他记录引用，无法删除。请先删除相关的入库记录。');
       } else {
@@ -84,27 +101,13 @@ const SuppliersPage: React.FC = () => {
 
   // 导出供应商数据
   const handleExport = () => {
-    const columns = [
-      { key: 'name', label: '供应商名称' },
-      { key: 'contact_person', label: '联系人' },
-      { key: 'phone', label: '联系电话' },
-      { key: 'email', label: '邮箱' },
-      { key: 'address', label: '地址' },
-    ];
-    downloadCSV(data, columns, '供应商数据');
+    downloadCSV(data, SUPPLIER_COLUMNS, '供应商数据');
     message.success('导出成功');
   };
 
   // 下载导入模板
   const handleDownloadTemplate = () => {
-    const columns = [
-      { key: 'name', label: '供应商名称' },
-      { key: 'contact_person', label: '联系人' },
-      { key: 'phone', label: '联系电话' },
-      { key: 'email', label: '邮箱' },
-      { key: 'address', label: '地址' },
-    ];
-    downloadTemplate(columns, '供应商导入模板');
+    downloadTemplate(SUPPLIER_COLUMNS, '供应商导入模板');
     message.success('模板下载成功');
   };
 
@@ -116,8 +119,20 @@ const SuppliersPage: React.FC = () => {
         resolve(e.target?.result as string);
       };
       reader.onerror = reject;
-      // 不指定编码，让浏览器使用默认编码
       reader.readAsText(file);
+    });
+  };
+
+  // 过滤导入数据，仅保留白名单字段，防止 CSV 注入额外字段
+  const sanitizeImportItems = (items: any[]): any[] => {
+    return items.map(item => {
+      const sanitized: any = {};
+      for (const key of IMPORT_ALLOWED_KEYS) {
+        if (item.hasOwnProperty(key)) {
+          sanitized[key] = item[key];
+        }
+      }
+      return sanitized;
     });
   };
 
@@ -130,39 +145,34 @@ const SuppliersPage: React.FC = () => {
 
     try {
       const text = await readFileText(selectedFile);
-      const columns = [
-        { key: 'name', label: '供应商名称' },
-        { key: 'contact_person', label: '联系人' },
-        { key: 'phone', label: '联系电话' },
-        { key: 'email', label: '邮箱' },
-        { key: 'address', label: '地址' },
-      ];
-      
-      const items = csvToObjects(text, columns);
-      
+      const items = csvToObjects(text, SUPPLIER_COLUMNS);
+
       if (items.length === 0) {
         message.error('文件中没有有效数据');
         return;
       }
 
-      const { error } = await supabase.from('suppliers').insert(items);
+      // 字段白名单过滤，防止注入额外字段
+      const sanitizedItems = sanitizeImportItems(items);
+
+      const { error } = await supabase.from('suppliers').insert(sanitizedItems);
       if (error) throw error;
-      
+
       message.success(`成功导入 ${items.length} 条供应商数据`);
       setImportModalOpen(false);
-      fetchData();
+      fetchData(1, pagination.pageSize);
     } catch (error: any) {
       message.error(error.message || '导入失败');
     }
   };
 
-  const columns = [
+  const columns = useMemo(() => [
     { title: '供应商名称', dataIndex: 'name', key: 'name' },
     { title: '联系人', dataIndex: 'contact_person', key: 'contact_person' },
     { title: '联系电话', dataIndex: 'phone', key: 'phone' },
     { title: '邮箱', dataIndex: 'email', key: 'email' },
     { title: '地址', dataIndex: 'address', key: 'address', ellipsis: true },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (date: string) => new Date(date).toLocaleString() },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (date: string) => formatSafeDate(date) },
     {
       title: '操作', key: 'action', width: 160,
       render: (_: any, record: any) => (
@@ -174,7 +184,7 @@ const SuppliersPage: React.FC = () => {
         </Space>
       ),
     },
-  ];
+  ], []);
 
   return (
     <div>

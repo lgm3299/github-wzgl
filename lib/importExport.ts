@@ -1,118 +1,278 @@
-import { supabase } from './supabase';
+/**
+ * Excel/CSV 导入导出工具
+ * 修复：CSV 注入、URL.revokeObjectURL 时序、参数校验、错误日志
+ */
 
 // ============================================
-// Excel/CSV 导入导出工具
+// 常量配置
+// ============================================
+const CSV_BOM = '\uFEFF';
+const CSV_MIME_TYPE = 'text/csv;charset=utf-8;';
+const MAX_CSV_ROWS = 10000;       // 最大导出行数
+const MAX_FILE_SIZE_MB = 10;       // 最大导入文件大小（MB）
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+/**
+ * CSV 注入危险字符：单元格以这些字符开头时，Excel 会将其解释为公式执行
+ * 参考：https://owasp.org/www-community/attacks/CSV_Injection
+ */
+const CSV_INJECTION_CHARS = ['=', '+', '-', '@', '\t', '\r'];
+
+// ============================================
+// 通用工具函数
 // ============================================
 
 /**
- * 下载 CSV 模板
+ * 检查并转义 CSV 注入危险字符
+ * 如果值以危险字符开头，在前面添加单引号（CSV 安全做法）
  */
-export function downloadTemplate(columns: { key: string; label: string }[], filename: string) {
-  const header = columns.map(c => c.label).join(',');
-  const sampleRow = columns.map(c => '').join(',');
-  const csvContent = `\uFEFF${header}\n${sampleRow}`;
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+function escapeCsvInjection(value: string): string {
+  if (!value) return value;
+  const str = String(value);
+  if (CSV_INJECTION_CHARS.some(ch => str.startsWith(ch))) {
+    return `'${str}`;
+  }
+  return str;
+}
+
+/**
+ * 安全地下载 Blob（修复 revokeObjectURL 时序问题）
+ * 等待 click 事件处理完成后再释放 URL
+ */
+function safeDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${filename}.csv`;
+  link.href = url;
+  link.download = filename;
+  // 添加到 DOM 以确保某些浏览器（Firefox）能正确触发下载
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(link.href);
+
+  // 延迟释放 URL，确保下载已触发
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+/**
+ * 将行数组转换为 CSV 行字符串（含转义）
+ */
+function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): string {
+  return row
+    .map((value, index) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      // 处理包含逗号、换行符、双引号的值
+      if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return escapeCsvInjection(str);
+    })
+    .join(',');
+}
+
+// ============================================
+// 导出函数
+// ============================================
+
+export interface CsvColumn {
+  key: string;
+  label: string;
+}
+
+/**
+ * 下载 CSV 模板（空模板，仅含表头）
+ */
+export function downloadTemplate(columns: CsvColumn[], filename: string): void {
+  if (!columns || columns.length === 0) {
+    console.error('[downloadTemplate] columns 不能为空');
+    throw new Error('导出列定义不能为空');
+  }
+  if (!filename) {
+    console.error('[downloadTemplate] filename 不能为空');
+    throw new Error('文件名不能为空');
+  }
+
+  try {
+    const header = columns.map(c => c.label).join(',');
+    const csvContent = `${CSV_BOM}${header}\n`;
+    const blob = new Blob([csvContent], { type: CSV_MIME_TYPE });
+    safeDownload(blob, `${filename}.csv`);
+  } catch (error) {
+    console.error('[downloadTemplate] 下载失败:', error);
+    throw error;
+  }
 }
 
 /**
  * 下载 CSV 数据
+ * @param data 数据数组
+ * @param columns 列定义
+ * @param filename 文件名（不含扩展名）
  */
-export function downloadCSV(data: any[], columns: { key: string; label: string }[], filename: string) {
-  const header = columns.map(c => c.label).join(',');
-  const rows = data.map(row => 
-    columns.map(col => {
-      let value = row[col.key];
-      if (value === null || value === undefined) return '';
-      // 处理包含逗号或换行符的值
-      const str = String(value);
-      if (str.includes(',') || str.includes('\n') || str.includes('"')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    }).join(',')
-  );
-  
-  const csvContent = `\uFEFF${header}\n${rows.join('\n')}`;
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${filename}.csv`;
-  link.click();
-  URL.revokeObjectURL(link.href);
+export function downloadCSV(data: any[], columns: CsvColumn[], filename: string): void {
+  if (!data || data.length === 0) {
+    console.warn('[downloadCSV] 数据为空，无需导出');
+    return;
+  }
+  if (!columns || columns.length === 0) {
+    console.error('[downloadCSV] columns 不能为空');
+    throw new Error('导出列定义不能为空');
+  }
+  if (!filename) {
+    console.error('[downloadCSV] filename 不能为空');
+    throw new Error('文件名不能为空');
+  }
+
+  try {
+    // 限制导出行数，防止内存溢出
+    const exportData = data.length > MAX_CSV_ROWS ? data.slice(0, MAX_CSV_ROWS) : data;
+    if (data.length > MAX_CSV_ROWS) {
+      console.warn(`[downloadCSV] 数据量(${data.length})超过最大限制(${MAX_CSV_ROWS})，已截断`);
+    }
+
+    const header = columns.map(c => c.label).join(',');
+    const rows = exportData.map(row =>
+      columns
+        .map(col => {
+          const value = row[col.key];
+          if (value === null || value === undefined) return '';
+          const str = String(value);
+          if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return escapeCsvInjection(str);
+        })
+        .join(',')
+    );
+
+    const csvContent = `${CSV_BOM}${header}\n${rows.join('\n')}`;
+    const blob = new Blob([csvContent], { type: CSV_MIME_TYPE });
+    safeDownload(blob, `${filename}.csv`);
+  } catch (error) {
+    console.error('[downloadCSV] 下载失败:', error);
+    throw error;
+  }
 }
 
+// ============================================
+// 解析函数
+// ============================================
+
 /**
- * 解析 CSV 文件
+ * 解析 CSV 文本为二维字符串数组
+ * 支持：引号包裹、双引号转义、换行符、BOM 自动去除
+ * 注意：大文件建议使用流式解析，此函数适用于中小文件
  */
 export function parseCSV(text: string): string[][] {
+  if (!text || typeof text !== 'string') {
+    console.error('[parseCSV] text 不能为空');
+    throw new Error('CSV 文本不能为空');
+  }
+
+  // 去除 UTF-8 BOM
+  let csvText = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentValue = '';
   let inQuotes = false;
-  
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    
+  let i = 0;
+
+  while (i < csvText.length) {
+    const char = csvText[i];
+
     if (inQuotes) {
       if (char === '"') {
-        if (i + 1 < text.length && text[i + 1] === '"') {
+        // 双引号转义："" 表示一个 " 字符
+        if (i + 1 < csvText.length && csvText[i + 1] === '"') {
           currentValue += '"';
-          i++;
+          i += 2;
+          continue;
         } else {
           inQuotes = false;
+          i++;
         }
       } else {
         currentValue += char;
+        i++;
       }
     } else {
       if (char === '"') {
         inQuotes = true;
+        i++;
       } else if (char === ',') {
         currentRow.push(currentValue);
         currentValue = '';
-      } else if (char === '\n' || char === '\r') {
-        if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
-          i++;
-        }
+        i++;
+      } else if (char === '\r') {
+        // 处理 \r\n 或 \r
         currentRow.push(currentValue);
         if (currentRow.some(cell => cell.trim() !== '')) {
           rows.push(currentRow);
         }
         currentRow = [];
         currentValue = '';
+        if (i + 1 < csvText.length && csvText[i + 1] === '\n') {
+          i += 2;
+        } else {
+          i++;
+        }
+      } else if (char === '\n') {
+        currentRow.push(currentValue);
+        if (currentRow.some(cell => cell.trim() !== '')) {
+          rows.push(currentRow);
+        }
+        currentRow = [];
+        currentValue = '';
+        i++;
       } else {
         currentValue += char;
+        i++;
       }
     }
   }
-  
+
+  // 处理最后一行
   currentRow.push(currentValue);
   if (currentRow.some(cell => cell.trim() !== '')) {
     rows.push(currentRow);
   }
-  
+
   return rows;
 }
 
 /**
- * CSV 转换为对象数组
+ * 将 CSV 文本转换为对象数组
+ * @param csvText CSV 文本
+ * @param columns 列定义（key 对应 CSV 表头的映射）
  */
-export function csvToObjects(csvText: string, columns: { key: string; label: string }[]): any[] {
+export function csvToObjects(csvText: string, columns: CsvColumn[]): any[] {
+  if (!csvText) {
+    console.error('[csvToObjects] csvText 不能为空');
+    throw new Error('CSV 内容不能为空');
+  }
+  if (!columns || columns.length === 0) {
+    console.error('[csvToObjects] columns 不能为空');
+    throw new Error('列定义不能为空');
+  }
+
   const rows = parseCSV(csvText);
-  if (rows.length < 2) return [];
-  
+  if (rows.length < 2) {
+    console.warn('[csvToObjects] CSV 数据行不足（至少需要表头+1行数据）');
+    return [];
+  }
+
   const headers = rows[0];
   const dataRows = rows.slice(1);
-  
-  return dataRows.map(row => {
+
+  return dataRows.map((row, rowIndex) => {
     const obj: any = {};
     columns.forEach((col, index) => {
-      const value = row[index] || '';
+      const rawValue = row[index] || '';
+      // 去除可能的注入转义前缀（单引号）
+      const value = rawValue.startsWith("'") ? rawValue.slice(1) : rawValue;
       // 尝试转换为数字
       const num = Number(value);
       obj[col.key] = value === '' ? null : (!isNaN(num) && value.trim() !== '' ? num : value);
@@ -121,11 +281,96 @@ export function csvToObjects(csvText: string, columns: { key: string; label: str
   });
 }
 
+// ============================================
+// 文件导入函数
+// ============================================
+
+export interface UploadResult {
+  success: boolean;
+  data?: any[];
+  error?: string;
+  fileName?: string;
+  fileSize?: number;
+}
+
 /**
- * 文件上传组件
+ * 读取并解析上传的 CSV/Excel 文件
+ * @param file 上传的文件对象
+ * @param columns 列定义
+ * @returns 解析结果
  */
-export interface UploadProps {
-  accept?: string;
-  maxSize?: number; // MB
-  onChange?: (file: File | null) => void;
+export async function parseUploadFile(file: File, columns: CsvColumn[]): Promise<UploadResult> {
+  if (!file) {
+    return { success: false, error: '未选择文件' };
+  }
+  if (!columns || columns.length === 0) {
+    return { success: false, error: '列定义不能为空' };
+  }
+
+  // 文件大小检查
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    const msg = `文件大小(${(file.size / 1024 / 1024).toFixed(2)}MB)超过限制(${MAX_FILE_SIZE_MB}MB)`;
+    console.error('[parseUploadFile]', msg);
+    return { success: false, error: msg };
+  }
+
+  const fileName = file.name.toLowerCase();
+
+  try {
+    if (fileName.endsWith('.csv')) {
+      const text = await file.text();
+      const data = csvToObjects(text, columns);
+      return {
+        success: true,
+        data,
+        fileName: file.name,
+        fileSize: file.size,
+      };
+    }
+
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      // Excel 解析需要引入 xlsx 库，这里返回提示
+      const msg = '暂不支持 Excel 文件，请先将文件另存为 CSV 格式后上传';
+      console.warn('[parseUploadFile]', msg);
+      return { success: false, error: msg };
+    }
+
+    return { success: false, error: '不支持的文件格式，请上传 .csv 文件' };
+  } catch (error: any) {
+    console.error('[parseUploadFile] 解析失败:', error);
+    return { success: false, error: `文件解析失败：${error?.message || '未知错误'}` };
+  }
+}
+
+/**
+ * 触发文件选择对话框并读取文件
+ * @param columns 列定义
+ * @param accept 可接受的文件类型，默认 '.csv'
+ * @returns 解析结果
+ */
+export async function uploadAndParse(
+  columns: CsvColumn[],
+  accept: string = '.csv'
+): Promise<UploadResult> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+
+    input.onchange = async (e: any) => {
+      const file: File = e.target.files?.[0];
+      if (!file) {
+        resolve({ success: false, error: '未选择文件' });
+        return;
+      }
+      const result = await parseUploadFile(file, columns);
+      resolve(result);
+    };
+
+    input.oncancel = () => {
+      resolve({ success: false, error: '已取消选择文件' });
+    };
+
+    input.click();
+  });
 }

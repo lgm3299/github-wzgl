@@ -2,10 +2,9 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, Row, Col, Upload, Divider, DatePicker, Alert, Checkbox } from 'antd';
 import { ReloadOutlined, DownloadOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
 import { getMaterials, getInventories, getCurrentUser, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate, csvToObjects } from '@/lib/importExport';
+import { downloadCSV, downloadTemplate } from '@/lib/importExport';
 
 const { Title } = Typography;
-const { Option } = Select;
 
 // 出库状态映射常量
 const OUTBOUND_STATUS_MAP: Record<string, { color: string; text: string }> = {
@@ -15,11 +14,15 @@ const OUTBOUND_STATUS_MAP: Record<string, { color: string; text: string }> = {
   completed: { color: 'blue', text: '已完成' },
 };
 
-// 生成出库单号函数
+// 生成出库单号函数（使用时间戳+随机数，降低重复概率）
 const generateOrderNo = (): string => {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const timeStr = String(now.getHours()).padStart(2, '0')
+    + String(now.getMinutes()).padStart(2, '0')
+    + String(now.getSeconds()).padStart(2, '0');
   const randomNum = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-  return `CK${dateStr}${randomNum}`;
+  return `CK${dateStr}${timeStr}${randomNum}`;
 };
 
 const OutboundPage: React.FC = () => {
@@ -39,17 +42,13 @@ const OutboundPage: React.FC = () => {
   const loadInventory = async () => {
     setLoading(true);
     try {
-      console.log('开始加载库存数据...');
       const [matRes, invRes] = await Promise.all([
         getMaterials({ pageSize: 1000 }),
         getInventories(),
       ]);
-      console.log('获取到物资数据:', matRes);
-      console.log('获取到库存数据:', invRes);
 
       const materialsList = matRes?.data || [];
-      console.log('物资列表:', materialsList);
-      
+
       const inventoryMap = new Map();
       if (invRes) {
         invRes.forEach((inv: any) => {
@@ -62,12 +61,8 @@ const OutboundPage: React.FC = () => {
         current_quantity: inventoryMap.get(mat.id) || 0,
       }));
 
-      console.log('库存详情:', inventoryWithDetails);
       setInventory(inventoryWithDetails);
     } catch (error: any) {
-      console.error('加载库存失败:', error);
-      console.error('错误详情:', error.message);
-      console.error('错误堆栈:', error.stack);
       message.error(`加载库存失败: ${error.message || '未知错误'}`);
     } finally {
       setLoading(false);
@@ -111,7 +106,6 @@ const OutboundPage: React.FC = () => {
       setHistoryData(flatData);
       setHistoryModalOpen(true);
     } catch (error: any) {
-      console.error('加载历史记录失败:', error);
       message.error('加载历史记录失败');
     } finally {
       setHistoryLoading(false);
@@ -128,8 +122,75 @@ const OutboundPage: React.FC = () => {
       const user = await getCurrentUser();
       setCurrentUser(user);
     } catch (error) {
-      console.error('获取用户信息失败:', error);
+      // 获取用户信息失败，使用默认值
     }
+  };
+
+  // 校验日期是否有效
+  const formatSafeDate = (date: string | null | undefined): string => {
+    if (!date) return '-';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleString();
+  };
+
+  // 顺序处理出库明细（避免并发更新库存导致数据竞争）
+  const processOutboundItems = async (
+    orderId: string,
+    rows: any[],
+    operator: string,
+  ): Promise<{ successCount: number; failCount: number; messages: string[] }> => {
+    let successCount = 0;
+    let failCount = 0;
+    const messages: string[] = [];
+
+    for (const row of rows) {
+      const quantity = row.outbound_quantity;
+
+      if (!quantity || quantity <= 0) {
+        failCount++;
+        continue;
+      }
+
+      if (quantity > row.current_quantity) {
+        messages.push(`${row.name} 库存不足！当前库存：${row.current_quantity}`);
+        failCount++;
+        continue;
+      }
+
+      try {
+        // 创建出库明细
+        const { error: itemError } = await supabase
+          .from('outbound_items')
+          .insert([{
+            outbound_id: orderId,
+            material_id: row.id,
+            quantity,
+            unit_price: row.price || 0,
+            total_amount: quantity * (row.price || 0),
+          }]);
+
+        if (itemError) throw itemError;
+
+        // 更新库存（串行执行，避免并发竞争）
+        const { error: updateError } = await supabase
+          .from('inventory')
+          .update({
+            quantity: Math.max(0, (row.current_quantity || 0) - quantity),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('material_id', row.id);
+
+        if (updateError) throw updateError;
+
+        successCount++;
+      } catch (error: any) {
+        messages.push(`处理物资 ${row.name} 失败: ${error.message || '未知错误'}`);
+        failCount++;
+      }
+    }
+
+    return { successCount, failCount, messages };
   };
 
   // 批量出库处理
@@ -141,8 +202,6 @@ const OutboundPage: React.FC = () => {
 
     const { recipient, purpose, remark } = values;
     const operator = currentUser?.full_name || currentUser?.email || '系统';
-    let successCount = 0;
-    let failCount = 0;
     const orderNo = generateOrderNo();
 
     try {
@@ -162,61 +221,14 @@ const OutboundPage: React.FC = () => {
 
       if (orderError) throw orderError;
 
-      // 批量处理每个物资 - 使用并行处理提升性能
-      const processingResults: Promise<void>[] = [];
+      const { successCount, failCount, messages } = await processOutboundItems(
+        orderData.id,
+        selectedRows,
+        operator,
+      );
 
-      for (const row of selectedRows) {
-        const quantity = row.outbound_quantity;
-        
-        if (!quantity || quantity <= 0) {
-          failCount++;
-          continue;
-        }
-
-        // 检查库存
-        if (quantity > row.current_quantity) {
-          message.warning(`${row.name} 库存不足！当前库存：${row.current_quantity}`);
-          failCount++;
-          continue;
-        }
-
-        processingResults.push(
-          (async () => {
-            try {
-              // 创建出库明细
-              const { error: itemError } = await supabase
-                .from('outbound_items')
-                .insert([{
-                  outbound_id: orderData.id,
-                  material_id: row.id,
-                  quantity,
-                  unit_price: row.price || 0,
-                  total_amount: quantity * (row.price || 0),
-                }]);
-
-              if (itemError) throw itemError;
-
-              // 更新库存
-              const { error: updateError } = await supabase
-                .from('inventory')
-                .update({
-                  quantity: Math.max(0, (row.current_quantity || 0) - quantity),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('material_id', row.id);
-
-              if (updateError) throw updateError;
-
-              successCount++;
-            } catch (error: any) {
-              console.error(`处理物资 ${row.name} 失败:`, error.message);
-              failCount++;
-            }
-          })()
-        );
-      }
-
-      await Promise.all(processingResults);
+      // 显示处理消息
+      messages.forEach(msg => message.warning(msg));
 
       if (successCount > 0) {
         message.success(`批量出库成功！成功 ${successCount} 项，失败 ${failCount} 项。出库单号：${orderNo}`);
@@ -229,14 +241,10 @@ const OutboundPage: React.FC = () => {
       setSelectedRows([]);
       loadInventory();
     } catch (error: any) {
-      console.error('批量出库失败:', error.message);
       message.error(error.message || '批量出库失败');
     }
   };
 
-  // 出库处理 - 已移除，统一使用批量出库
-
-  // 使用useMemo优化列定义，避免不必要的重新渲染
   // 切换选中状态的处理函数
   const handleToggleSelect = (record: any) => {
     const isSelected = selectedRows.some(row => row.id === record.id);
@@ -249,18 +257,18 @@ const OutboundPage: React.FC = () => {
 
   // 更新出库数量
   const handleUpdateQuantity = (recordId: number, quantity: number | null) => {
-    setSelectedRows(selectedRows.map(row => 
+    setSelectedRows(selectedRows.map(row =>
       row.id === recordId ? { ...row, outbound_quantity: quantity || 0 } : row
     ));
   };
 
   const columns = useMemo(() => [
-    { 
-      title: '选择', 
-      key: 'selection', 
+    {
+      title: '选择',
+      key: 'selection',
       width: 80,
       render: (_: any, record: any) => (
-        <Checkbox 
+        <Checkbox
           checked={selectedRows.some(row => row.id === record.id)}
           onChange={() => handleToggleSelect(record)}
         />
@@ -270,20 +278,20 @@ const OutboundPage: React.FC = () => {
     { title: '物资名称', dataIndex: 'name', key: 'name', width: 150 },
     { title: '规格型号', dataIndex: 'specification', key: 'specification', width: 120 },
     { title: '单位', dataIndex: 'unit', key: 'unit', width: 60 },
-    { 
-      title: '当前库存', 
-      dataIndex: 'current_quantity', 
-      key: 'current_quantity', 
+    {
+      title: '当前库存',
+      dataIndex: 'current_quantity',
+      key: 'current_quantity',
       width: 100,
-      render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>
+      render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>,
     },
-    { 
-      title: '出库数量', 
-      key: 'outbound_quantity', 
+    {
+      title: '出库数量',
+      key: 'outbound_quantity',
       width: 120,
       render: (_: any, record: any) => (
         <InputNumber
-          min={0}
+          min={1}
           max={record.current_quantity}
           defaultValue={1}
           onChange={(value) => handleUpdateQuantity(record.id, value)}
@@ -360,18 +368,18 @@ const OutboundPage: React.FC = () => {
                 { title: '物资名称', dataIndex: 'name', key: 'name', width: 150 },
                 { title: '单位', dataIndex: 'unit', key: 'unit', width: 60 },
                 { title: '当前库存', dataIndex: 'current_quantity', key: 'current_quantity', width: 100 },
-                { 
-                  title: '出库数量', 
-                  dataIndex: 'outbound_quantity', 
-                  key: 'outbound_quantity', 
+                {
+                  title: '出库数量',
+                  dataIndex: 'outbound_quantity',
+                  key: 'outbound_quantity',
                   width: 150,
                   render: (_: any, record: any) => (
                     <InputNumber
-                      min={0}
+                      min={1}
                       max={record.current_quantity}
                       value={record.outbound_quantity}
                       onChange={(value) => {
-                        setSelectedRows(selectedRows.map(row => 
+                        setSelectedRows(selectedRows.map(row =>
                           row.id === record.id ? { ...row, outbound_quantity: value || 0 } : row
                         ));
                       }}
@@ -404,17 +412,17 @@ const OutboundPage: React.FC = () => {
             { title: '出库数量', dataIndex: 'material_quantity', key: 'material_quantity', width: 100 },
             { title: '领用人', dataIndex: 'recipient', key: 'recipient', width: 120 },
             { title: '操作人', dataIndex: 'operator', key: 'operator', width: 100 },
-            { 
-              title: '状态', 
-              dataIndex: 'status', 
-              key: 'status', 
+            {
+              title: '状态',
+              dataIndex: 'status',
+              key: 'status',
               width: 100,
               render: (s: string) => {
                 const st = OUTBOUND_STATUS_MAP[s] || { color: 'default', text: s };
                 return <Tag color={st.color}>{st.text}</Tag>;
               },
             },
-            { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (date: string) => new Date(date).toLocaleString() },
+            { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (date: string) => formatSafeDate(date) },
           ]}
           dataSource={historyData}
           loading={historyLoading}

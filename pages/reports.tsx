@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Typography, Card, Row, Col, Statistic, Spin } from 'antd';
+import { Typography, Card, Row, Col, Statistic, Spin, message } from 'antd';
 import { DatabaseOutlined, ImportOutlined, ExportOutlined } from '@ant-design/icons';
 import { getDashboardStats } from '@/lib/supabase';
 
@@ -15,8 +15,12 @@ const ReportsPage: React.FC = () => {
       try {
         const result = await getDashboardStats();
         setStats(result || {});
-      } catch {}
-      finally { setLoading(false); }
+      } catch (error) {
+        console.error('获取统计数据失败:', error);
+        message.error('获取统计数据失败，请稍后重试');
+      } finally {
+        setLoading(false);
+      }
     };
     fetchStats();
   }, []);
@@ -26,7 +30,7 @@ const ReportsPage: React.FC = () => {
   return (
     <div>
       <Title level={4} style={{ marginBottom: 24 }}>报表统计</Title>
-      
+
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>

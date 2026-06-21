@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Typography, Card, Alert, Tabs, Table, Button, Space, Modal, Form, Input, Select, message, Popconfirm, Tag, InputNumber } from 'antd';
 import { SettingOutlined, SafetyOutlined, UserOutlined, TeamOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined, KeyOutlined } from '@ant-design/icons';
-import { 
+import {
   supabase,
   getDepartments, createDepartment, updateDepartment, deleteDepartment,
   getRoles, createRole, updateRole, deleteRole,
@@ -13,13 +13,16 @@ import {
 
 const { Title } = Typography;
 
+/** 创建用户后等待时间（ms），避免触发 Supabase 速率限制 */
+const SIGNUP_COOLDOWN_MS = 500;
+
 const AdminPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('users');
 
   return (
     <div>
       <Title level={4} style={{ marginBottom: 24 }}>后台管理</Title>
-      
+
       <Alert
         message="提示"
         description="请先在 Supabase Dashboard 中运行 admin_schema.sql 脚本初始化数据库表。"
@@ -76,7 +79,8 @@ const UserManagementTab: React.FC = () => {
       const result = await getAllUsers();
       setUsers(result || []);
     } catch (error: any) {
-      message.error(error.message || '获取用户列表失败');
+      console.error('获取用户列表失败:', error?.message || error);
+      message.error(error?.message || '获取用户列表失败');
     } finally {
       setLoading(false);
     }
@@ -87,7 +91,8 @@ const UserManagementTab: React.FC = () => {
       const result = await getRoles();
       setRoles(result || []);
     } catch (error: any) {
-      message.error(error.message || '获取角色列表失败');
+      console.error('获取角色列表失败:', error?.message || error);
+      message.error(error?.message || '获取角色列表失败');
     }
   };
 
@@ -96,12 +101,13 @@ const UserManagementTab: React.FC = () => {
       const result = await getDepartments();
       setDepartments(result || []);
     } catch (error: any) {
-      message.error(error.message || '获取部门列表失败');
+      console.error('获取部门列表失败:', error?.message || error);
+      message.error(error?.message || '获取部门列表失败');
     }
   };
 
-  useEffect(() => { 
-    fetchUsers(); 
+  useEffect(() => {
+    fetchUsers();
     fetchRoles();
     fetchDepartments();
   }, []);
@@ -129,19 +135,19 @@ const UserManagementTab: React.FC = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      
+
       if (isCreating) {
-        // 创建新用户
+        // 创建新用户：调用 Supabase Auth 注册
         const signUpResult = await signUp(values.email, values.password);
-        
+
         if (!signUpResult?.user?.id) {
           throw new Error('创建用户失败，请检查 Supabase 邮箱确认设置');
         }
-        
-        // 等待 500ms 避免触发速率限制
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 创建用户档案
+
+        // 等待指定时间，避免触发 Supabase 速率限制
+        await new Promise(resolve => setTimeout(resolve, SIGNUP_COOLDOWN_MS));
+
+        // 创建用户档案（若失败需提示管理员手动处理 Auth 用户）
         const { error } = await supabase
           .from('user_profiles')
           .insert([{
@@ -150,8 +156,14 @@ const UserManagementTab: React.FC = () => {
             role: values.role,
             department: values.department,
           }]);
-        
-        if (error) throw error;
+
+        if (error) {
+          console.error(
+            '用户档案创建失败，Supabase Auth 中已创建用户（邮箱：' + values.email + '），请手动清理或重试。',
+            error
+          );
+          throw new Error('用户档案创建失败，但 Auth 用户已创建，请联系开发者处理');
+        }
         message.success('创建成功');
       } else if (editingUserId) {
         // 编辑用户 - 更新 full_name, role, department
@@ -163,16 +175,16 @@ const UserManagementTab: React.FC = () => {
             department: values.department,
           })
           .eq('id', editingUserId);
-        
+
         if (error) throw error;
         message.success('更新成功');
       }
-      
+
       setModalOpen(false);
       fetchUsers();
     } catch (error: any) {
-      console.error('用户操作失败:', error.message);
-      message.error(error.message || '操作失败');
+      console.error('用户操作失败:', error?.message || error);
+      message.error(error?.message || '操作失败');
     }
   };
 
@@ -182,7 +194,8 @@ const UserManagementTab: React.FC = () => {
       message.success('删除成功');
       fetchUsers();
     } catch (error: any) {
-      message.error(error.message || '删除失败');
+      console.error('删除用户失败:', error?.message || error);
+      message.error(error?.message || '删除失败');
     }
   };
 
@@ -196,19 +209,29 @@ const UserManagementTab: React.FC = () => {
   const handlePasswordSubmit = async () => {
     try {
       const values = await passwordForm.validateFields();
-      
-      if (values.password !== values.confirmPassword) {
-        message.error('两次输入的密码不一致');
+
+      if (!resettingUserId) {
+        message.error('重置失败：用户 ID 为空');
         return;
       }
-      
-      await adminResetUserPassword(resettingUserId!, values.password);
+
+      await adminResetUserPassword(resettingUserId, values.password);
       message.success(`用户 ${resettingUserName} 的密码已重置`);
       setPasswordModalOpen(false);
       setResettingUserId(null);
       setResettingUserName('');
     } catch (error: any) {
-      message.error(error.message || '重置密码失败');
+      console.error('重置密码失败:', error?.message || error);
+      message.error(error?.message || '重置密码失败');
+    }
+  };
+
+  const renderDate = (date: string) => {
+    if (!date) return '-';
+    try {
+      return new Date(date).toLocaleString();
+    } catch {
+      return '-';
     }
   };
 
@@ -217,14 +240,14 @@ const UserManagementTab: React.FC = () => {
     { title: '姓名', dataIndex: 'full_name', key: 'full_name' },
     { title: '角色', dataIndex: 'role', key: 'role', render: (role: string) => <Tag color="blue">{role}</Tag> },
     { title: '部门', dataIndex: 'department', key: 'department' },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (date: string) => new Date(date).toLocaleString() },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: renderDate },
     {
       title: '操作', key: 'action', width: 280,
       render: (_: any, record: any) => (
         <Space>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
           <Button type="link" size="small" icon={<KeyOutlined />} onClick={() => handleResetPassword(record)}>重置密码</Button>
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm title="确认删除该用户?" onConfirm={() => handleDelete(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -240,7 +263,7 @@ const UserManagementTab: React.FC = () => {
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新增用户</Button>
         </Space>
       </div>
-      
+
       <Table rowKey="id" columns={columns} dataSource={users} loading={loading} />
 
       <Modal
@@ -252,18 +275,18 @@ const UserManagementTab: React.FC = () => {
         <Form form={form} layout="vertical">
           {isCreating && (
             <>
-              <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email' }]}>
+              <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email', message: '请输入有效的邮箱地址' }]}>
                 <Input />
               </Form.Item>
-              <Form.Item name="password" label="密码" rules={[{ required: true, min: 6 }]}>
+              <Form.Item name="password" label="密码" rules={[{ required: true, min: 6, message: '密码长度不能少于6位' }]}>
                 <Input.Password />
               </Form.Item>
             </>
           )}
-          <Form.Item name="full_name" label="姓名">
+          <Form.Item name="full_name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+          <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
             <Select>
               {roles.map((role: any) => (
                 <Select.Option key={role.id} value={role.code}>
@@ -308,9 +331,19 @@ const UserManagementTab: React.FC = () => {
           <Form.Item
             name="confirmPassword"
             label="确认密码"
-            rules={[{ required: true, message: '请再次输入密码' }]}
             dependencies={['password']}
             hasFeedback
+            rules={[
+              { required: true, message: '请再次输入密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('password') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'));
+                },
+              }),
+            ]}
           >
             <Input.Password placeholder="请再次输入密码" />
           </Form.Item>
@@ -338,7 +371,8 @@ const RoleManagementTab: React.FC = () => {
       const [rolesRes, permsRes] = await Promise.all([getRoles(), getPermissions()]);
       setRoles(rolesRes || []);
       setPermissions(permsRes || []);
-    } catch {
+    } catch (error: any) {
+      console.error('获取角色/权限数据失败:', error?.message || error);
       message.error('获取数据失败');
     } finally {
       setLoading(false);
@@ -350,7 +384,7 @@ const RoleManagementTab: React.FC = () => {
   const handleEdit = async (role: any) => {
     setEditingRole(role.id);
     form.setFieldsValue({ name: role.name, code: role.code, description: role.description });
-    
+
     const rolePerms = await getRolePermissions(role.id);
     setSelectedPermissions(rolePerms.map((rp: any) => rp.permission_id));
     setModalOpen(true);
@@ -359,7 +393,7 @@ const RoleManagementTab: React.FC = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      
+
       if (editingRole) {
         await updateRole(editingRole, values);
         await updateRolePermissions(editingRole, selectedPermissions);
@@ -368,11 +402,12 @@ const RoleManagementTab: React.FC = () => {
         await createRole(values);
         message.success('创建成功');
       }
-      
+
       setModalOpen(false);
       fetchData();
     } catch (error: any) {
-      message.error(error.message || '操作失败');
+      console.error('角色操作失败:', error?.message || error);
+      message.error(error?.message || '操作失败');
     }
   };
 
@@ -381,7 +416,8 @@ const RoleManagementTab: React.FC = () => {
       await deleteRole(roleId);
       message.success('删除成功');
       fetchData();
-    } catch {
+    } catch (error: any) {
+      console.error('删除角色失败:', error?.message || error);
       message.error('删除失败');
     }
   };
@@ -395,7 +431,7 @@ const RoleManagementTab: React.FC = () => {
       render: (_: any, record: any) => (
         <Space>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm title="确认删除该角色?" onConfirm={() => handleDelete(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -422,10 +458,10 @@ const RoleManagementTab: React.FC = () => {
         width={700}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="角色名称" rules={[{ required: true }]}>
+          <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="code" label="角色编码" rules={[{ required: true }]}>
+          <Form.Item name="code" label="角色编码" rules={[{ required: true, message: '请输入角色编码' }]}>
             <Input placeholder="如: admin, manager, staff" />
           </Form.Item>
           <Form.Item name="description" label="描述">
@@ -467,7 +503,8 @@ const DepartmentManagementTab: React.FC = () => {
     try {
       const result = await getDepartments();
       setDepartments(result || []);
-    } catch {
+    } catch (error: any) {
+      console.error('获取部门列表失败:', error?.message || error);
       message.error('获取数据失败');
     } finally {
       setLoading(false);
@@ -485,7 +522,7 @@ const DepartmentManagementTab: React.FC = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      
+
       if (editingDept) {
         await updateDepartment(editingDept, values);
         message.success('更新成功');
@@ -493,11 +530,12 @@ const DepartmentManagementTab: React.FC = () => {
         await createDepartment(values);
         message.success('创建成功');
       }
-      
+
       setModalOpen(false);
       fetchDepartments();
     } catch (error: any) {
-      message.error(error.message || '操作失败');
+      console.error('部门操作失败:', error?.message || error);
+      message.error(error?.message || '操作失败');
     }
   };
 
@@ -506,21 +544,31 @@ const DepartmentManagementTab: React.FC = () => {
       await deleteDepartment(deptId);
       message.success('删除成功');
       fetchDepartments();
-    } catch {
+    } catch (error: any) {
+      console.error('删除部门失败:', error?.message || error);
       message.error('删除失败');
+    }
+  };
+
+  const renderDate = (date: string) => {
+    if (!date) return '-';
+    try {
+      return new Date(date).toLocaleString();
+    } catch {
+      return '-';
     }
   };
 
   const columns = [
     { title: '部门名称', dataIndex: 'name', key: 'name' },
     { title: '描述', dataIndex: 'description', key: 'description' },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (date: string) => new Date(date).toLocaleString() },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: renderDate },
     {
       title: '操作', key: 'action', width: 200,
       render: (_: any, record: any) => (
         <Space>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm title="确认删除该部门?" onConfirm={() => handleDelete(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -546,7 +594,7 @@ const DepartmentManagementTab: React.FC = () => {
         onCancel={() => setModalOpen(false)}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="部门名称" rules={[{ required: true }]}>
+          <Form.Item name="name" label="部门名称" rules={[{ required: true, message: '请输入部门名称' }]}>
             <Input />
           </Form.Item>
           <Form.Item name="description" label="描述">

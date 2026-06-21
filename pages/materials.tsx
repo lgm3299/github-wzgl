@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, DatePicker, Upload, Alert } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
-import { getMaterials, getCategories, createMaterial, updateMaterial, deleteMaterial, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate, parseCSV, csvToObjects } from '@/lib/importExport';
+import { getMaterials, getCategories, getSuppliers, createMaterial, updateMaterial, deleteMaterial, supabase } from '@/lib/supabase';
+import { downloadCSV, downloadTemplate, csvToObjects } from '@/lib/importExport';
 
 const { Title } = Typography;
 
@@ -16,7 +16,7 @@ const EXPORT_COLUMNS = [
   { key: 'location', label: '存放位置' },
 ];
 
-// 导入列定义常量
+// 导入列定义常量（同时用于校验导入字段）
 const IMPORT_COLUMNS = [
   { key: 'code', label: '物资编码' },
   { key: 'name', label: '物资名称' },
@@ -25,6 +25,17 @@ const IMPORT_COLUMNS = [
   { key: 'price', label: '参考单价' },
   { key: 'location', label: '存放位置' },
 ];
+
+// 允许导入的字段白名单（防止 CSV 注入额外字段）
+const IMPORT_ALLOWED_KEYS = IMPORT_COLUMNS.map(col => col.key);
+
+// 安全日期格式化
+const formatSafeDate = (date: any): string => {
+  if (!date) return '-';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '-';
+  return d.format?.('YYYY-MM-DD') || date;
+};
 
 const MaterialsPage: React.FC = () => {
   const [data, setData] = useState<any[]>([]);
@@ -59,7 +70,6 @@ const MaterialsPage: React.FC = () => {
         total: result?.total || 0,
       });
     } catch (error: any) {
-      console.error('获取数据失败:', error.message || error);
       message.error('获取数据失败');
     } finally {
       setLoading(false);
@@ -70,17 +80,21 @@ const MaterialsPage: React.FC = () => {
     try {
       const result = await getCategories();
       setCategories(result || []);
-    } catch {}
+    } catch {
+      // 静默处理，分类加载失败不影响主流程
+    }
   };
 
-  const fetchSuppliers = async () => {
+  const fetchSuppliersList = async () => {
     try {
       const result = await getSuppliers({ pageSize: 1000 });
-      setSuppliers(result || []);
-    } catch {}
+      setSuppliers(result?.data || []);
+    } catch {
+      // 静默处理
+    }
   };
 
-  useEffect(() => { fetchData(); fetchCategories(); fetchSuppliers(); }, []);
+  useEffect(() => { fetchData(); fetchCategories(); fetchSuppliersList(); }, []);
 
   const handleCategoryChange = (value: string) => {
     setSelectedCategory(value);
@@ -101,17 +115,16 @@ const MaterialsPage: React.FC = () => {
   const handleAdd = () => {
     setEditingId(null);
     form.resetFields();
-    // 自动生成物资编码
     generateCode();
     setModalOpen(true);
   };
 
-  // 生成物资编码 - 简化版本
+  // 生成物资编码
   const generateCode = async () => {
     try {
       const result = await getMaterials({ pageSize: 1000 });
-      const materials = Array.isArray(result) ? result : (result?.data || []);
-      
+      const materials = result?.data || [];
+
       let maxNum = 0;
       materials.forEach((item: any) => {
         if (item.code && item.code.startsWith('WZ')) {
@@ -121,11 +134,10 @@ const MaterialsPage: React.FC = () => {
           }
         }
       });
-      
+
       const newCode = `WZ${String(maxNum + 1).padStart(3, '0')}`;
       form.setFieldsValue({ code: newCode });
     } catch (error) {
-      console.error('生成编码失败:', error);
       form.setFieldsValue({ code: 'WZ001' });
     }
   };
@@ -142,10 +154,8 @@ const MaterialsPage: React.FC = () => {
       message.success('删除成功');
       fetchData(pagination.current, pagination.pageSize);
     } catch (error: any) {
-      console.error('删除物资失败:', error);
       const errorMessage = error?.message || error?.hint || '删除失败';
-      
-      // 如果是外键约束错误，给出友好提示
+
       if (errorMessage.includes('foreign key constraint') || errorMessage.includes('delete on table')) {
         message.warning('该物资已被其他记录引用，无法删除。请先删除相关的入库/出库记录。');
       } else {
@@ -154,32 +164,30 @@ const MaterialsPage: React.FC = () => {
     }
   };
 
-  // 批量删除 - 添加错误隔离
+  // 批量删除
   const handleBatchDelete = async () => {
     if (selectedRows.length === 0) {
       message.warning('请选择要删除的记录');
       return;
     }
-    
+
     try {
       let successCount = 0;
       let failCount = 0;
-      
+
       for (const row of selectedRows) {
         try {
           await deleteMaterial(row.id);
           successCount++;
         } catch {
           failCount++;
-          console.error(`删除物资 ${row.id} 失败`);
         }
       }
-      
+
       message.success(`成功删除 ${successCount} 条记录${failCount > 0 ? `，${failCount} 条失败` : ''}`);
       setSelectedRows([]);
       fetchData(pagination.current, pagination.pageSize);
     } catch (error: any) {
-      console.error('批量删除失败:', error);
       message.error('批量删除失败');
     }
   };
@@ -196,7 +204,9 @@ const MaterialsPage: React.FC = () => {
       }
       setModalOpen(false);
       fetchData(pagination.current, pagination.pageSize);
-    } catch {}
+    } catch {
+      // 表单校验失败，不处理
+    }
   };
 
   // 导出物资数据
@@ -219,8 +229,20 @@ const MaterialsPage: React.FC = () => {
         resolve(e.target?.result as string);
       };
       reader.onerror = reject;
-      // 不指定编码，让浏览器使用默认编码（通常会正确识别 GBK/UTF-8）
       reader.readAsText(file);
+    });
+  };
+
+  // 过滤导入数据，仅保留白名单字段，防止 CSV 注入额外字段（如 id、status）
+  const sanitizeImportItems = (items: any[]): any[] => {
+    return items.map(item => {
+      const sanitized: any = {};
+      for (const key of IMPORT_ALLOWED_KEYS) {
+        if (item.hasOwnProperty(key)) {
+          sanitized[key] = item[key];
+        }
+      }
+      return sanitized;
     });
   };
 
@@ -234,31 +256,33 @@ const MaterialsPage: React.FC = () => {
     try {
       const text = await readFileText(selectedFile);
       const items = csvToObjects(text, IMPORT_COLUMNS);
-      
+
       if (items.length === 0) {
         message.error('文件中没有有效数据');
         return;
       }
 
-      // 批量插入
+      // 字段白名单过滤，防止注入额外字段
+      const sanitizedItems = sanitizeImportItems(items);
+
       const { error } = await supabase
         .from('materials')
-        .insert(items.map((item: any) => ({
+        .insert(sanitizedItems.map((item: any) => ({
           ...item,
-          price: item.price || null,
+          price: item.price ? Number(item.price) : null,
         })));
 
       if (error) throw error;
-      
+
       message.success(`成功导入 ${items.length} 条物资数据`);
       setImportModalOpen(false);
-      fetchData();
+      fetchData(1, pagination.pageSize);
     } catch (error: any) {
       message.error(error.message || '导入失败');
     }
   };
 
-  const columns = [
+  const columns = useMemo(() => [
     { title: '物资编码', dataIndex: 'code', key: 'code', width: 120 },
     { title: '物资名称', dataIndex: 'name', key: 'name', width: 150 },
     { title: '规格型号', dataIndex: 'specification', key: 'specification', width: 120 },
@@ -273,7 +297,7 @@ const MaterialsPage: React.FC = () => {
         </Popconfirm>
       </Space>
     )},
-  ];
+  ], []);
 
   return (
     <div>

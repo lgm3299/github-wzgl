@@ -1,8 +1,27 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+
+// ============================================
+// 常量配置（便于统一修改）
+// ============================================
+const ORDER_NO_PREFIX = {
+  INBOUND: 'RK',
+  OUTBOUND: 'CK',
+  STOCKTAKING: 'PD',
+} as const;
+
+const ORDER_NO_RANDOM_LENGTH = 3;
+const ORDER_NO_DATE_FORMAT = 'YYYYMMDD'; // 用于注释说明日期格式
+const DATE_TIME_START = ' 00:00:00';
+const DATE_TIME_END = ' 23:59:59';
+const DEFAULT_PAGE_SIZE = 20;
+
+// ============================================
+// Supabase 客户端初始化
+// ============================================
 
 // 验证配置
 if (!supabaseUrl || !supabaseKey) {
@@ -12,47 +31,84 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 // 创建普通客户端（用于普通操作）
-export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+export const supabase: SupabaseClient | null =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 // 创建管理员客户端（用于管理操作）
-let adminSupabase: ReturnType<typeof createClient> | null = null;
+let adminSupabase: SupabaseClient | null = null;
 if (supabaseServiceKey && supabaseUrl) {
   adminSupabase = createClient(supabaseUrl, supabaseServiceKey);
 }
 
-// 简单的消息提示替代 antd message
-function showNotification(message: string, type: 'error' | 'success' = 'error') {
-  console[type === 'error' ? 'error' : 'log'](message);
+// ============================================
+// 安全包装器：获取 supabase 客户端，未配置时抛出明确错误
+// ============================================
+function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    throw new Error(
+      'Supabase 未配置，请在 Vercel 添加环境变量 VITE_SUPABASE_URL 和 VITE_SUPABASE_PUBLISHABLE_KEY'
+    );
+  }
+  return supabase;
 }
 
-// 创建一个安全的 supabase 包装器，当 supabase 为 null 时不会崩溃
-const safeSupabase = supabase || {
-  auth: {
-    signUp: () => Promise.reject(new Error('Supabase 未配置，请在 Vercel 添加环境变量 VITE_SUPABASE_URL 和 VITE_SUPABASE_PUBLISHABLE_KEY')),
-    signInWithPassword: () => Promise.reject(new Error('Supabase 未配置，请在 Vercel 添加环境变量 VITE_SUPABASE_URL 和 VITE_SUPABASE_PUBLISHABLE_KEY')),
-    signOut: () => Promise.reject(new Error('Supabase 未配置')),
-    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-    updateUser: () => Promise.reject(new Error('Supabase 未配置')),
-  },
-  from: () => ({
-    select: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    insert: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
-    update: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
-    delete: () => Promise.resolve({ error: { message: 'Supabase 未配置' } }),
-    eq: () => ({
-      select: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
-      single: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
-    }),
-    order: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    ilike: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    gte: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    lte: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    or: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    not: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    range: () => Promise.resolve({ data: [], error: { message: 'Supabase 未配置' } }),
-    single: () => Promise.resolve({ data: null, error: { message: 'Supabase 未配置' } }),
-  }),
-};
+function getAdminSupabase(): SupabaseClient {
+  if (!adminSupabase) {
+    throw new Error('Supabase 管理员客户端未配置，请设置 VITE_SUPABASE_SERVICE_KEY');
+  }
+  return adminSupabase;
+}
+
+// ============================================
+// 通用工具函数
+// ============================================
+
+/**
+ * 生成唯一订单号
+ * 格式：前缀 + YYYYMMDD + 3位随机数
+ * 注意：高并发场景下建议使用数据库序列或 UUID
+ */
+function generateOrderNo(prefix: string): string {
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const random = String(Math.floor(Math.random() * 1000)).padStart(ORDER_NO_RANDOM_LENGTH, '0');
+  return `${prefix}${dateStr}${random}`;
+}
+
+/**
+ * 输入验证：必填字段
+ */
+function requireValue<T>(value: T | null | undefined, fieldName: string): T {
+  if (value === null || value === undefined || value === '') {
+    throw new Error(`参数错误：${fieldName} 不能为空`);
+  }
+  return value;
+}
+
+/**
+ * 安全地获取分页参数
+ */
+function getPaginationParams(params?: any): { start: number; end: number } | null {
+  if (!params?.page || !params?.pageSize) return null;
+  const start = (params.page - 1) * params.pageSize;
+  const end = start + params.pageSize - 1;
+  return { start, end };
+}
+
+/**
+ * 安全地构建日期范围查询
+ */
+function applyDateRange(query: any, field: string, startDate?: string, endDate?: string) {
+  let q = query;
+  if (startDate && endDate) {
+    q = q.gte(field, startDate + DATE_TIME_START).lte(field, endDate + DATE_TIME_END);
+  } else if (startDate) {
+    q = q.gte(field, startDate + DATE_TIME_START);
+  } else if (endDate) {
+    q = q.lte(field, endDate + DATE_TIME_END);
+  }
+  return q;
+}
 
 // ============================================
 // 认证相关函数
@@ -67,42 +123,53 @@ export interface User {
 }
 
 export async function signUp(email: string, password: string) {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-  });
-  if (error) throw error;
+  requireValue(email, 'email');
+  requireValue(password, 'password');
+  const { data, error } = await getSupabase().auth.signUp({ email, password });
+  if (error) {
+    console.error('[signUp] 注册失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function signIn(email: string, password: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (error) throw error;
+  requireValue(email, 'email');
+  requireValue(password, 'password');
+  const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
+  if (error) {
+    console.error('[signIn] 登录失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  const { error } = await getSupabase().auth.signOut();
+  if (error) {
+    console.error('[signOut] 登出失败:', error.message);
+    throw error;
+  }
 }
 
 export async function getCurrentUser(): Promise<User | null> {
   try {
-    const { data: { session }, error } = await supabase.auth.getSession();
+    const { data: { session }, error } = await getSupabase().auth.getSession();
     if (error || !session) return null;
-    
-    const { data: profile } = await supabase
+
+    const { data: profile, error: profileError } = await getSupabase()
       .from('user_profiles')
       .select('*')
       .eq('id', session.user.id)
       .single();
-    
+
+    if (profileError) {
+      console.warn('[getCurrentUser] 获取用户资料失败:', profileError.message);
+    }
+
     return profile ? { ...session.user, ...profile } : null;
   } catch (error) {
-    console.error('getCurrentUser error:', error);
+    console.error('[getCurrentUser] 异常:', error);
     return null;
   }
 }
@@ -119,11 +186,14 @@ export interface Category {
 }
 
 export async function getCategories() {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('categories')
     .select('*')
     .order('name');
-  if (error) throw error;
+  if (error) {
+    console.error('[getCategories] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
@@ -142,24 +212,23 @@ export interface Supplier {
 }
 
 export async function getSuppliers(params?: any) {
-  let query = supabase.from('suppliers').select('*');
-  
+  const pg = getPaginationParams(params);
+  let query = getSupabase().from('suppliers').select('*', pg ? { count: 'exact', head: true } : undefined);
+
   if (params?.keyword) {
     query = query.ilike('name', `%${params.keyword}%`);
   }
-  
-  // 先获取总数
-  let countQuery = supabase.from('suppliers').select('*', { count: 'exact', head: true });
-  
-  if (params?.keyword) {
-    countQuery = countQuery.ilike('name', `%${params.keyword}%`);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
   }
-  
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
-  
-  const { count } = await countQuery;
-  
+
+  const { data, error, count } = await query.order('created_at', { ascending: false });
+  if (error) {
+    console.error('[getSuppliers] 查询失败:', error.message);
+    throw error;
+  }
+
   return {
     data: data || [],
     total: count || 0,
@@ -167,32 +236,44 @@ export async function getSuppliers(params?: any) {
 }
 
 export async function createSupplier(supplier: Omit<Supplier, 'id' | 'created_at'>) {
-  const { data, error } = await supabase
+  requireValue(supplier.name, 'name');
+  const { data, error } = await getSupabase()
     .from('suppliers')
     .insert([supplier])
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createSupplier] 创建失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function updateSupplier(id: number, supplier: Partial<Supplier>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('suppliers')
     .update(supplier)
     .eq('id', id)
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateSupplier] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
 export async function deleteSupplier(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('suppliers')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteSupplier] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -216,110 +297,82 @@ export interface Material {
 }
 
 export async function getMaterials(params?: any) {
-  // 优化：使用外键连接一次性获取分类数据，避免多次网络请求
-  let query = supabase
+  const pg = getPaginationParams(params);
+  let query = getSupabase()
     .from('materials')
-    .select('*, categories(name)');
-  
+    .select('*, categories(name)', pg ? { count: 'exact', head: true } : undefined);
+
   if (params?.keyword) {
     query = query.or(`name.ilike.%${params.keyword}%,code.ilike.%${params.keyword}%`);
   }
-  
+
   if (params?.category_id) {
     query = query.eq('category_id', params.category_id);
   }
-  
+
   if (params?.status !== undefined) {
     query = query.eq('status', params.status);
   }
-  
-  if (params?.startDate && params?.endDate) {
-    query = query
-      .gte('created_at', params.startDate + ' 00:00:00')
-      .lte('created_at', params.endDate + ' 23:59:59');
-  } else if (params?.startDate) {
-    query = query.gte('created_at', params.startDate + ' 00:00:00');
-  } else if (params?.endDate) {
-    query = query.lte('created_at', params.endDate + ' 23:59:59');
+
+  query = applyDateRange(query, 'created_at', params?.startDate, params?.endDate);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
   }
-  
-  // 分页
-  if (params?.page && params?.pageSize) {
-    const start = (params.page - 1) * params.pageSize;
-    const end = start + params.pageSize - 1;
-    query = query.range(start, end);
-  }
-  
+
   const { data, error, count } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
-  
-  // 优化：使用 head 查询总数，但只在需要分页时查询
-  let totalCount = 0;
-  if (params?.page && params?.pageSize) {
-    // 构建相同的查询条件来获取总数
-    let countQuery = supabase
-      .from('materials')
-      .select('*', { count: 'exact', head: true });
-    
-    if (params?.keyword) {
-      countQuery = countQuery.or(`name.ilike.%${params.keyword}%,code.ilike.%${params.keyword}%`);
-    }
-    
-    if (params?.category_id) {
-      countQuery = countQuery.eq('category_id', params.category_id);
-    }
-    
-    if (params?.status !== undefined) {
-      countQuery = countQuery.eq('status', params.status);
-    }
-    
-    if (params?.startDate && params?.endDate) {
-      countQuery = countQuery
-        .gte('created_at', params.startDate + ' 00:00:00')
-        .lte('created_at', params.endDate + ' 23:59:59');
-    } else if (params?.startDate) {
-      countQuery = countQuery.gte('created_at', params.startDate + ' 00:00:00');
-    } else if (params?.endDate) {
-      countQuery = countQuery.lte('created_at', params.endDate + ' 23:59:59');
-    }
-    
-    const { count: pageCount } = await countQuery;
-    totalCount = pageCount || 0;
+  if (error) {
+    console.error('[getMaterials] 查询失败:', error.message);
+    throw error;
   }
-  
+
   return {
     data: data || [],
-    total: totalCount,
+    total: count || 0,
   };
 }
 
 export async function createMaterial(material: Omit<Material, 'id' | 'created_at' | 'updated_at'>) {
-  const { data, error } = await supabase
+  requireValue(material.name, 'name');
+  requireValue(material.code, 'code');
+  requireValue(material.unit, 'unit');
+  const { data, error } = await getSupabase()
     .from('materials')
     .insert([material])
     .select('*, categories(name)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createMaterial] 创建失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function updateMaterial(id: number, material: Partial<Material>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('materials')
     .update(material)
     .eq('id', id)
     .select('*, categories(name)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateMaterial] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
 export async function deleteMaterial(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('materials')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteMaterial] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -349,38 +402,43 @@ export interface InboundItem {
 }
 
 export async function getInboundOrders(params?: any) {
-  // 优化：使用外键连接一次性获取关联数据
-  let query = supabase
+  const pg = getPaginationParams(params);
+  let query = getSupabase()
     .from('inbound')
     .select('*, suppliers(name), inbound_items(*, materials(name, code))');
-  
+
   if (params?.status) {
     query = query.eq('status', params.status);
   }
-  
-  if (params?.startDate && params?.endDate) {
-    query = query
-      .gte('created_at', params.startDate + ' 00:00:00')
-      .lte('created_at', params.endDate + ' 23:59:59');
+
+  query = applyDateRange(query, 'created_at', params?.startDate, params?.endDate);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
   }
-  
-  if (params?.page && params?.pageSize) {
-    const start = (params.page - 1) * params.pageSize;
-    const end = start + params.pageSize - 1;
-    query = query.range(start, end);
-  }
-  
+
   const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
+  if (error) {
+    console.error('[getInboundOrders] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
+/**
+ * 创建入库单
+ * 注意：创建入库单和插入明细非原子操作。
+ * 若明细插入失败，已创建的入库单需要通过补偿逻辑清理。
+ * 生产环境建议使用数据库 RPC 事务。
+ */
 export async function createInboundOrder(order: Omit<InboundOrder, 'id' | 'order_no' | 'created_at' | 'updated_at'>) {
-  // 生成入库单号
-  const orderNo = `RK${new Date().toISOString().slice(0,10).replace(/-/g, '')}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-  
+  requireValue(order.supplier_id, 'supplier_id');
+  requireValue(order.operator, 'operator');
+
+  const orderNo = generateOrderNo(ORDER_NO_PREFIX.INBOUND);
+
   // 创建入库单
-  const { data: orderData, error: orderError } = await supabase
+  const { data: orderData, error: orderError } = await getSupabase()
     .from('inbound')
     .insert([{
       order_no: orderNo,
@@ -391,132 +449,166 @@ export async function createInboundOrder(order: Omit<InboundOrder, 'id' | 'order
     }])
     .select()
     .single();
-  
-  if (orderError) throw orderError;
-  
+
+  if (orderError) {
+    console.error('[createInboundOrder] 创建入库单失败:', orderError.message);
+    throw orderError;
+  }
+
   // 如果有物资明细，插入明细
   if (order.items && order.items.length > 0) {
     const items = order.items.map((item: any) => ({
       inbound_id: orderData.id,
-      material_id: item.material_id,
-      quantity: item.quantity,
+      material_id: requireValue(item.material_id, 'items[].material_id'),
+      quantity: requireValue(item.quantity, 'items[].quantity'),
       unit_price: item.unit_price || 0,
       total_amount: item.total_amount || 0,
       remark: item.remark || '',
     }));
-    
-    const { error: itemsError } = await supabase
+
+    const { error: itemsError } = await getSupabase()
       .from('inbound_items')
       .insert(items);
-    
-    if (itemsError) throw itemsError;
+
+    if (itemsError) {
+      // 补偿：删除已创建的入库单
+      console.error('[createInboundOrder] 插入明细失败，补偿删除入库单:', itemsError.message, { orderId: orderData.id });
+      await getSupabase().from('inbound').delete().eq('id', orderData.id);
+      throw itemsError;
+    }
   }
-  
+
   return orderData;
 }
 
 export async function updateInboundOrder(id: number, order: Partial<InboundOrder>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('inbound')
     .update(order)
     .eq('id', id)
     .select('*, inbound_items(*)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateInboundOrder] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
-// 只更新入库单状态（移除调试日志）
 export async function updateInboundOrderStatus(id: number, status: string) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  requireValue(status, 'status');
+  const { data, error } = await getSupabase()
     .from('inbound')
     .update({ status })
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
-    console.error('更新入库单状态失败:', error);
+    console.error('[updateInboundOrderStatus] 更新失败:', error.message, { id, status });
     throw error;
   }
-  
+
   return data;
 }
 
-// 审批入库单并更新库存（移除调试日志）
+/**
+ * 审批入库单并更新库存
+ * 注意：更新状态和更新库存非原子操作，存在竞态风险。
+ * 生产环境建议使用数据库 RPC 事务 + 行级锁。
+ */
 export async function approveInboundOrder(id: number) {
+  requireValue(id, 'id');
+
   // 1. 获取入库单明细
-  const { data: order, error: orderError } = await supabase
+  const { data: order, error: orderError } = await getSupabase()
     .from('inbound')
     .select('*, inbound_items(*)')
     .eq('id', id)
     .single();
-  
-  if (orderError) throw orderError;
-  if (!order) throw new Error('入库单不存在');
-  
+
+  if (orderError) {
+    console.error('[approveInboundOrder] 查询入库单失败:', orderError.message, { id });
+    throw orderError;
+  }
+  if (!order) {
+    throw new Error('入库单不存在');
+  }
+
   // 2. 更新状态为已完成
-  const { error: updateError } = await supabase
+  const { error: updateError } = await getSupabase()
     .from('inbound')
     .update({ status: 'completed' })
     .eq('id', id);
-  
-  if (updateError) throw updateError;
-  
-  // 3. 更新库存 - 累加数量
+
+  if (updateError) {
+    console.error('[approveInboundOrder] 更新状态失败:', updateError.message, { id });
+    throw updateError;
+  }
+
+  // 3. 串行更新库存（避免并行竞态导致数据不一致）
   const items = (order as any).inbound_items || [];
-  
+
   if (items.length === 0) {
     return order;
   }
-  
-  // 优化：并行处理所有库存更新
-  const updatePromises = items.map(async (item: any) => {
+
+  for (const item of items) {
     if (!item.material_id || !item.quantity) {
-      return;
+      console.warn('[approveInboundOrder] 跳过无效明细:', item);
+      continue;
     }
-    
+
     // 先查询当前库存
-    const { data: existingInv } = await supabase
+    const { data: existingInv, error: invError } = await getSupabase()
       .from('inventory')
       .select('quantity')
       .eq('material_id', item.material_id)
       .single();
-    
+
+    if (invError && invError.code !== 'PGRST116') {
+      // PGRST116 = no rows returned，允许库存记录不存在
+      console.error('[approveInboundOrder] 查询库存失败:', invError.message, { materialId: item.material_id });
+      throw invError;
+    }
+
     const currentQuantity = existingInv?.quantity || 0;
     const newQuantity = currentQuantity + item.quantity;
-    
+
     // 使用 upsert 更新库存
-    await supabase
+    const { error: upsertError } = await getSupabase()
       .from('inventory')
       .upsert({
         material_id: item.material_id,
         quantity: newQuantity,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'material_id' });
-  });
-  
-  await Promise.all(updatePromises);
-  
+
+    if (upsertError) {
+      console.error('[approveInboundOrder] 更新库存失败:', upsertError.message, { materialId: item.material_id });
+      throw upsertError;
+    }
+  }
+
   return order;
 }
 
-// 完成入库单（状态变为 completed）
 export async function completeInboundOrder(id: number) {
-  const { error } = await supabase
-    .from('inbound')
-    .update({ status: 'completed' })
-    .eq('id', id);
-  
-  if (error) throw error;
+  return await updateInboundOrderStatus(id, 'completed');
 }
 
 export async function deleteInboundOrder(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('inbound')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteInboundOrder] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -545,38 +637,42 @@ export interface OutboundItem {
 }
 
 export async function getOutboundOrders(params?: any) {
-  // 优化：使用外键连接一次性获取关联数据
-  let query = supabase
+  const pg = getPaginationParams(params);
+  let query = getSupabase()
     .from('outbound')
     .select('*, outbound_items(*, materials(name, code))');
-  
+
   if (params?.status) {
     query = query.eq('status', params.status);
   }
-  
-  if (params?.startDate && params?.endDate) {
-    query = query
-      .gte('created_at', params.startDate + ' 00:00:00')
-      .lte('created_at', params.endDate + ' 23:59:59');
+
+  query = applyDateRange(query, 'created_at', params?.startDate, params?.endDate);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
   }
-  
-  if (params?.page && params?.pageSize) {
-    const start = (params.page - 1) * params.pageSize;
-    const end = start + params.pageSize - 1;
-    query = query.range(start, end);
-  }
-  
+
   const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
+  if (error) {
+    console.error('[getOutboundOrders] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
+/**
+ * 创建出库单
+ * 注意：创建出库单和插入明细非原子操作，若明细插入失败会补偿删除入库单。
+ * 生产环境建议使用数据库 RPC 事务。
+ */
 export async function createOutboundOrder(order: Omit<OutboundOrder, 'id' | 'order_no' | 'created_at' | 'updated_at'>) {
-  // 生成出库单号
-  const orderNo = `CK${new Date().toISOString().slice(0,10).replace(/-/g, '')}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-  
+  requireValue(order.recipient, 'recipient');
+  requireValue(order.operator, 'operator');
+
+  const orderNo = generateOrderNo(ORDER_NO_PREFIX.OUTBOUND);
+
   // 创建出库单
-  const { data: orderData, error: orderError } = await supabase
+  const { data: orderData, error: orderError } = await getSupabase()
     .from('outbound')
     .insert([{
       order_no: orderNo,
@@ -588,136 +684,190 @@ export async function createOutboundOrder(order: Omit<OutboundOrder, 'id' | 'ord
     }])
     .select()
     .single();
-  
-  if (orderError) throw orderError;
-  
+
+  if (orderError) {
+    console.error('[createOutboundOrder] 创建出库单失败:', orderError.message);
+    throw orderError;
+  }
+
   // 如果有物资明细，插入明细
   if (order.items && order.items.length > 0) {
     const items = order.items.map((item: any) => ({
       outbound_id: orderData.id,
-      material_id: item.material_id,
-      quantity: item.quantity,
+      material_id: requireValue(item.material_id, 'items[].material_id'),
+      quantity: requireValue(item.quantity, 'items[].quantity'),
       remark: item.remark || '',
     }));
-    
-    const { error: itemsError } = await supabase
+
+    const { error: itemsError } = await getSupabase()
       .from('outbound_items')
       .insert(items);
-    
-    if (itemsError) throw itemsError;
+
+    if (itemsError) {
+      // 补偿：删除已创建的出库单
+      console.error('[createOutboundOrder] 插入明细失败，补偿删除出库单:', itemsError.message, { orderId: orderData.id });
+      await getSupabase().from('outbound').delete().eq('id', orderData.id);
+      throw itemsError;
+    }
   }
-  
+
   return orderData;
 }
 
 export async function updateOutboundOrder(id: number, order: Partial<OutboundOrder>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('outbound')
     .update(order)
     .eq('id', id)
     .select('*, outbound_items(*)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateOutboundOrder] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
-// 只更新出库单状态（移除调试日志）
 export async function updateOutboundOrderStatus(id: number, status: string) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  requireValue(status, 'status');
+  const { data, error } = await getSupabase()
     .from('outbound')
     .update({ status })
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
-    console.error('更新出库单状态失败:', error);
+    console.error('[updateOutboundOrderStatus] 更新失败:', error.message, { id, status });
     throw error;
   }
-  
+
   return data;
 }
 
-// 审批出库单（移除调试日志）
+/**
+ * 审批出库单并扣减库存
+ * 注意：
+ * 1. 更新状态和扣减库存非原子操作，存在竞态风险。
+ * 2. 扣减前会检查库存是否充足，防止超卖。
+ * 生产环境建议使用数据库 RPC 事务 + 行级锁。
+ */
 export async function approveOutboundOrder(id: number) {
+  requireValue(id, 'id');
+
   // 1. 获取出库单明细
-  const { data: order, error: orderError } = await supabase
+  const { data: order, error: orderError } = await getSupabase()
     .from('outbound')
     .select('*, outbound_items(*)')
     .eq('id', id)
     .single();
-  
-  if (orderError) throw orderError;
-  if (!order) throw new Error('出库单不存在');
-  
+
+  if (orderError) {
+    console.error('[approveOutboundOrder] 查询出库单失败:', orderError.message, { id });
+    throw orderError;
+  }
+  if (!order) {
+    throw new Error('出库单不存在');
+  }
+
   // 2. 更新状态为已完成
-  const { error: updateError } = await supabase
+  const { error: updateError } = await getSupabase()
     .from('outbound')
     .update({ status: 'completed' })
     .eq('id', id);
-  
-  if (updateError) throw updateError;
-  
-  // 3. 扣减库存
+
+  if (updateError) {
+    console.error('[approveOutboundOrder] 更新状态失败:', updateError.message, { id });
+    throw updateError;
+  }
+
+  // 3. 串行扣减库存（避免并行竞态）
   const items = (order as any).outbound_items || [];
-  
+
   if (items.length === 0) {
     return order;
   }
-  
-  // 优化：并行处理所有库存更新
-  const updatePromises = items.map(async (item: any) => {
+
+  for (const item of items) {
     if (!item.material_id || !item.quantity) {
-      return;
+      console.warn('[approveOutboundOrder] 跳过无效明细:', item);
+      continue;
     }
-    
+
     // 先获取当前库存
-    const { data: currentInv } = await supabase
+    const { data: currentInv, error: invError } = await getSupabase()
       .from('inventory')
       .select('quantity')
       .eq('material_id', item.material_id)
       .single();
-    
+
+    if (invError && invError.code !== 'PGRST116') {
+      console.error('[approveOutboundOrder] 查询库存失败:', invError.message, { materialId: item.material_id });
+      throw invError;
+    }
+
     const currentQty = currentInv?.quantity || 0;
-    const newQty = Math.max(0, currentQty - item.quantity);
-    
+
+    // 检查库存是否充足（防止超卖）
+    if (currentQty < item.quantity) {
+      const errorMsg = `库存不足：物资ID=${item.material_id}，当前库存=${currentQty}，出库数量=${item.quantity}`;
+      console.error('[approveOutboundOrder]', errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    const newQty = currentQty - item.quantity;
+
     // 使用 upsert 更新库存
-    await supabase
+    const { error: upsertError } = await getSupabase()
       .from('inventory')
       .upsert({
         material_id: item.material_id,
         quantity: newQty,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'material_id' });
-  });
-  
-  await Promise.all(updatePromises);
-  
+
+    if (upsertError) {
+      console.error('[approveOutboundOrder] 更新库存失败:', upsertError.message, { materialId: item.material_id });
+      throw upsertError;
+    }
+  }
+
   return order;
 }
 
-// 完成出库单
 export async function completeOutboundOrder(id: number) {
   return await approveOutboundOrder(id);
 }
 
-// 删除出库单
 export async function deleteOutboundOrder(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('outbound')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteOutboundOrder] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
-// 检查库存是否充足
 export async function checkInventory(materialId: number, quantity: number): Promise<{ sufficient: boolean; current: number }> {
-  const { data: inv } = await supabase
+  requireValue(materialId, 'materialId');
+  requireValue(quantity, 'quantity');
+
+  const { data: inv, error } = await getSupabase()
     .from('inventory')
     .select('quantity')
     .eq('material_id', materialId)
     .single();
-  
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('[checkInventory] 查询失败:', error.message, { materialId });
+    throw error;
+  }
+
   const currentQty = inv?.quantity || 0;
   return {
     sufficient: currentQty >= quantity,
@@ -739,23 +889,20 @@ export interface Inventory {
 }
 
 export async function getInventories(params?: any) {
-  // 优化：使用外键连接一次性获取所有数据，避免多次串行查询
-  let query = supabase
+  let query = getSupabase()
     .from('inventory')
     .select('*, materials(*, categories(name))');
-  
-  if (params?.startDate && params?.endDate) {
-    query = query
-      .gte('updated_at', params.startDate + ' 00:00:00')
-      .lte('updated_at', params.endDate + ' 23:59:59');
-  }
-  
+
+  query = applyDateRange(query, 'updated_at', params?.startDate, params?.endDate);
+
   const { data, error } = await query.order('updated_at', { ascending: false });
-  if (error) throw error;
-  
+  if (error) {
+    console.error('[getInventories] 查询失败:', error.message);
+    throw error;
+  }
+
   if (!data || data.length === 0) return [];
-  
-  // 数据已经在一次查询中获取，直接格式化返回
+
   return data.map((item: any) => ({
     ...item,
     material: item.materials ? {
@@ -767,13 +914,16 @@ export async function getInventories(params?: any) {
   }));
 }
 
-// 删除库存记录
 export async function deleteInventory(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('inventory')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteInventory] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -802,49 +952,57 @@ export interface StocktakingItem {
 }
 
 export async function getStocktakingOrders(params?: any) {
-  let query = supabase
+  const pg = getPaginationParams(params);
+  let query = getSupabase()
     .from('stocktaking')
     .select('*, stocktaking_items(*)');
-  
+
   if (params?.status) {
     query = query.eq('status', params.status);
   }
-  
-  if (params?.startDate && params?.endDate) {
-    query = query
-      .gte('created_at', params.startDate + ' 00:00:00')
-      .lte('created_at', params.endDate + ' 23:59:59');
+
+  query = applyDateRange(query, 'created_at', params?.startDate, params?.endDate);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
   }
-  
-  if (params?.page && params?.pageSize) {
-    const start = (params.page - 1) * params.pageSize;
-    const end = start + params.pageSize - 1;
-    query = query.range(start, end);
-  }
-  
+
   const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
+  if (error) {
+    console.error('[getStocktakingOrders] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
 export async function createStocktakingOrder(order: Omit<StocktakingOrder, 'id' | 'order_no' | 'created_at' | 'updated_at'>) {
-  const { data, error } = await supabase
+  requireValue(order.operator, 'operator');
+  const orderNo = generateOrderNo(ORDER_NO_PREFIX.STOCKTAKING);
+
+  const { data, error } = await getSupabase()
     .from('stocktaking')
-    .insert([order])
+    .insert([{ ...order, order_no: orderNo }])
     .select('*, stocktaking_items(*)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createStocktakingOrder] 创建失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function updateStocktakingOrder(id: number, order: Partial<StocktakingOrder>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('stocktaking')
     .update(order)
     .eq('id', id)
     .select('*, stocktaking_items(*)')
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateStocktakingOrder] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
@@ -853,57 +1011,61 @@ export async function updateStocktakingOrder(id: number, order: Partial<Stocktak
 // ============================================
 
 export async function getDashboardStats() {
-  // 优化：使用 Promise.all 并行获取所有统计数据，而不是串行等待
-  const [
-    { count: materialsCount },
-    { count: suppliersCount },
-    { count: inboundCount },
-    { count: outboundCount },
-  ] = await Promise.all([
-    supabase.from('materials').select('*', { count: 'exact', head: true }),
-    supabase.from('suppliers').select('*', { count: 'exact', head: true }),
-    supabase.from('inbound').select('*', { count: 'exact', head: true }),
-    supabase.from('outbound').select('*', { count: 'exact', head: true }),
-  ]);
-  
-  // 获取本月入库/出库数量 - 并行查询
-  const now = new Date();
-  const monthStart = now.toISOString().split('T')[0].slice(0, 7) + '-01';
-  
-  const [
-    { count: inboundThisMonth },
-    { count: outboundThisMonth },
-  ] = await Promise.all([
-    supabase.from('inbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
-    supabase.from('outbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
-  ]);
-  
-  // 获取库存预警数量
-  let warningCount = 0;
   try {
-    const { data: inventories } = await supabase
-      .from('inventory')
-      .select('quantity, materials(min_stock)');
-    
-    if (inventories) {
-      warningCount = inventories.filter(inv => 
-        inv.materials?.min_stock !== null && 
-        inv.quantity < inv.materials.min_stock
-      ).length;
+    const [
+      { count: materialsCount },
+      { count: suppliersCount },
+      { count: inboundCount },
+      { count: outboundCount },
+    ] = await Promise.all([
+      getSupabase().from('materials').select('*', { count: 'exact', head: true }),
+      getSupabase().from('suppliers').select('*', { count: 'exact', head: true }),
+      getSupabase().from('inbound').select('*', { count: 'exact', head: true }),
+      getSupabase().from('outbound').select('*', { count: 'exact', head: true }),
+    ]);
+
+    const now = new Date();
+    const monthStart = now.toISOString().split('T')[0].slice(0, 7) + '-01';
+
+    const [
+      { count: inboundThisMonth },
+      { count: outboundThisMonth },
+    ] = await Promise.all([
+      getSupabase().from('inbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+      getSupabase().from('outbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+    ]);
+
+    let warningCount = 0;
+    try {
+      const { data: inventories, error: invError } = await getSupabase()
+        .from('inventory')
+        .select('quantity, materials(min_stock)');
+
+      if (invError) {
+        console.warn('[getDashboardStats] 获取预警数量失败:', invError.message);
+      } else if (inventories) {
+        warningCount = inventories.filter(inv =>
+          inv.materials?.min_stock !== null &&
+          inv.quantity < inv.materials.min_stock
+        ).length;
+      }
+    } catch (e) {
+      console.warn('[getDashboardStats] 获取预警数量异常:', e);
     }
-  } catch (e) {
-    console.warn('获取预警数量失败:', e);
+
+    return {
+      totalMaterials: materialsCount || 0,
+      totalSuppliers: suppliersCount || 0,
+      totalInbound: inboundCount || 0,
+      totalOutbound: outboundCount || 0,
+      inboundThisMonth: inboundThisMonth || 0,
+      outboundThisMonth: outboundThisMonth || 0,
+      warningCount,
+    };
+  } catch (error) {
+    console.error('[getDashboardStats] 统计失败:', error);
+    throw error;
   }
-  
-  return {
-    totalMaterials: materialsCount || 0,
-    totalSuppliers: suppliersCount || 0,
-    totalInbound: inboundCount || 0,
-    totalOutbound: outboundCount || 0,
-    inboundThisMonth: inboundThisMonth || 0,
-    outboundThisMonth: outboundThisMonth || 0,
-    warningCount,
-  };
 }
 
 // ============================================
@@ -918,41 +1080,56 @@ export interface Department {
 }
 
 export async function getDepartments() {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('departments')
     .select('*')
     .order('name');
-  if (error) throw error;
+  if (error) {
+    console.error('[getDepartments] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
 export async function createDepartment(department: Omit<Department, 'id' | 'created_at'>) {
-  const { data, error } = await supabase
+  requireValue(department.name, 'name');
+  const { data, error } = await getSupabase()
     .from('departments')
     .insert([department])
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createDepartment] 创建失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function updateDepartment(id: number, department: Partial<Department>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('departments')
     .update(department)
     .eq('id', id)
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateDepartment] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
 export async function deleteDepartment(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('departments')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteDepartment] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -968,41 +1145,57 @@ export interface Role {
 }
 
 export async function getRoles() {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('roles')
     .select('*')
     .order('name');
-  if (error) throw error;
+  if (error) {
+    console.error('[getRoles] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
 export async function createRole(role: Omit<Role, 'id' | 'created_at'>) {
-  const { data, error } = await supabase
+  requireValue(role.name, 'name');
+  requireValue(role.code, 'code');
+  const { data, error } = await getSupabase()
     .from('roles')
     .insert([role])
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createRole] 创建失败:', error.message);
+    throw error;
+  }
   return data;
 }
 
 export async function updateRole(id: number, role: Partial<Role>) {
-  const { data, error } = await supabase
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
     .from('roles')
     .update(role)
     .eq('id', id)
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('[updateRole] 更新失败:', error.message, { id });
+    throw error;
+  }
   return data;
 }
 
 export async function deleteRole(id: number) {
-  const { error } = await supabase
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
     .from('roles')
     .delete()
     .eq('id', id);
-  if (error) throw error;
+  if (error) {
+    console.error('[deleteRole] 删除失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================
@@ -1018,37 +1211,59 @@ export interface Permission {
 }
 
 export async function getPermissions() {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('permissions')
     .select('*')
     .order('name');
-  if (error) throw error;
+  if (error) {
+    console.error('[getPermissions] 查询失败:', error.message);
+    throw error;
+  }
   return data || [];
 }
 
 export async function getRolePermissions(roleId: number) {
-  const { data, error } = await supabase
+  requireValue(roleId, 'roleId');
+  const { data, error } = await getSupabase()
     .from('role_permissions')
     .select('*, permissions(*)')
     .eq('role_id', roleId);
-  if (error) throw error;
+  if (error) {
+    console.error('[getRolePermissions] 查询失败:', error.message, { roleId });
+    throw error;
+  }
   return data || [];
 }
 
+/**
+ * 更新角色权限
+ * 注意：删除旧权限和插入新权限非原子操作。
+ * 生产环境建议使用数据库 RPC 事务。
+ */
 export async function updateRolePermissions(roleId: number, permissionIds: number[]) {
+  requireValue(roleId, 'roleId');
+
   // 先删除该角色的所有权限
-  await supabase
+  const { error: deleteError } = await getSupabase()
     .from('role_permissions')
     .delete()
     .eq('role_id', roleId);
-  
+
+  if (deleteError) {
+    console.error('[updateRolePermissions] 删除旧权限失败:', deleteError.message, { roleId });
+    throw deleteError;
+  }
+
   // 再插入新权限
   if (permissionIds.length > 0) {
     const permissions = permissionIds.map(permission_id => ({ role_id: roleId, permission_id }));
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('role_permissions')
       .insert(permissions);
-    if (error) throw error;
+    if (error) {
+      console.error('[updateRolePermissions] 插入新权限失败:', error.message, { roleId });
+      throw error;
+    }
   }
 }
 
@@ -1063,26 +1278,31 @@ export interface AdminUser {
   role?: string;
   department?: string;
   created_at: string;
+  last_sign_in?: string;
 }
 
-export async function getAllUsers() {
+export async function getAllUsers(): Promise<AdminUser[]> {
   // 优先使用 service role key 获取用户列表
   if (adminSupabase) {
     try {
-      const { data: authUsersData, error: authError } = await adminSupabase.auth.admin.listUsers();
-      if (!authError) {
+      const { data: authUsersData, error: authError } = await getAdminSupabase().auth.admin.listUsers();
+      if (authError) {
+        console.error('[getAllUsers] admin API 获取用户列表失败:', authError.message);
+      } else {
         const authUsers = authUsersData?.users || [];
-        
+
         if (authUsers.length > 0) {
           const userIds = authUsers.map(u => u.id);
-          
-          const { data: profiles, error: profilesError } = await adminSupabase
+
+          const { data: profiles, error: profilesError } = await getAdminSupabase()
             .from('user_profiles')
             .select('*')
             .in('id', userIds)
             .order('created_at', { ascending: false });
-          
-          if (!profilesError) {
+
+          if (profilesError) {
+            console.error('[getAllUsers] 查询用户资料失败:', profilesError.message);
+          } else {
             return authUsers.map(user => {
               const profile = profiles?.find(p => p.id === user.id);
               return {
@@ -1099,18 +1319,23 @@ export async function getAllUsers() {
         }
       }
     } catch (error) {
-      console.error('使用 service key 获取用户失败:', error);
+      console.error('[getAllUsers] 使用 service key 获取用户失败:', error);
     }
   }
-  
+
   // 降级方案：只从 user_profiles 表获取
   try {
-    const { data: profiles, error } = await supabase
+    const { data: profiles, error } = await getSupabase()
       .from('user_profiles')
       .select('*')
       .order('created_at', { ascending: false });
-    
-    if (!error && profiles) {
+
+    if (error) {
+      console.error('[getAllUsers] 降级方案查询失败:', error.message);
+      throw error;
+    }
+
+    if (profiles) {
       return profiles.map(p => ({
         id: p.id,
         email: '',
@@ -1121,36 +1346,62 @@ export async function getAllUsers() {
       }));
     }
   } catch (error) {
-    console.error('获取用户列表失败:', error);
+    console.error('[getAllUsers] 获取用户列表失败:', error);
   }
-  
+
   return [];
 }
 
 export async function updateUserRole(userId: string, role: string, department?: string) {
-  const { error } = await supabase
+  requireValue(userId, 'userId');
+  requireValue(role, 'role');
+  const { error } = await getSupabase()
     .from('user_profiles')
     .upsert({ id: userId, role, department });
-  if (error) throw error;
+  if (error) {
+    console.error('[updateUserRole] 更新失败:', error.message, { userId });
+    throw error;
+  }
 }
 
+/**
+ * 删除用户
+ * 注意：先删除认证用户，再删除关联数据，防止数据孤儿。
+ */
 export async function deleteUser(userId: string) {
-  // 删除用户资料
-  await supabase
+  requireValue(userId, 'userId');
+
+  // 1. 先删除认证用户（需要管理员权限）
+  try {
+    const { error: authError } = await getAdminSupabase().auth.admin.deleteUser(userId);
+    if (authError) {
+      console.error('[deleteUser] 删除认证用户失败:', authError.message, { userId });
+      throw authError;
+    }
+  } catch (error) {
+    console.error('[deleteUser] 删除认证用户异常:', error, { userId });
+    throw error;
+  }
+
+  // 2. 删除用户资料
+  const { error: profileError } = await getSupabase()
     .from('user_profiles')
     .delete()
     .eq('id', userId);
-  
-  // 删除用户角色关联
-  await supabase
+
+  if (profileError) {
+    console.warn('[deleteUser] 删除用户资料失败（已删除认证用户）:', profileError.message, { userId });
+  }
+
+  // 3. 删除用户角色关联
+  const { error: roleError } = await getSupabase()
     .from('user_roles')
     .delete()
     .eq('user_id', userId);
-  
-  // 删除认证用户 (需要管理员权限)
-  const authClient = adminSupabase || supabase;
-  const { error } = await authClient.auth.admin.deleteUser(userId);
-  if (error) throw error;
+
+  if (roleError) {
+    console.warn('[deleteUser] 删除用户角色关联失败:', roleError.message, { userId });
+  }
 }
 
 // ============================================
@@ -1162,28 +1413,60 @@ export async function deleteUser(userId: string) {
  * 使用 Supabase Admin API 直接修改用户密码
  */
 export async function adminResetUserPassword(userId: string, newPassword: string) {
-  if (!adminSupabase) {
-    throw new Error('管理员客户端不可用');
+  requireValue(userId, 'userId');
+  requireValue(newPassword, 'newPassword');
+
+  if (newPassword.length < 6) {
+    throw new Error('密码长度至少6位');
   }
-  
-  const { error } = await adminSupabase.auth.admin.updateUserById(userId, {
+
+  const { error } = await getAdminSupabase().auth.admin.updateUserById(userId, {
     password: newPassword,
   });
-  
-  if (error) throw error;
+
+  if (error) {
+    console.error('[adminResetUserPassword] 重置失败:', error.message, { userId });
+    throw error;
+  }
 }
 
 /**
  * 用户修改自己的密码
+ * 需要先验证当前密码（通过重新登录方式验证）
  */
 export async function updateUserPassword(currentPassword: string, newPassword: string) {
-  const { data: { user }, error } = await supabase.auth.updateUser({
+  requireValue(currentPassword, 'currentPassword');
+  requireValue(newPassword, 'newPassword');
+
+  if (newPassword.length < 6) {
+    throw new Error('新密码长度至少6位');
+  }
+
+  // 验证当前密码：尝试用当前密码重新登录
+  const { data: { user: currentUser } } = await getSupabase().auth.getUser();
+  if (!currentUser?.email) {
+    throw new Error('无法获取当前用户邮箱');
+  }
+
+  const { error: verifyError } = await getSupabase().auth.signInWithPassword({
+    email: currentUser.email,
+    password: currentPassword,
+  });
+
+  if (verifyError) {
+    console.warn('[updateUserPassword] 当前密码验证失败');
+    throw new Error('当前密码不正确');
+  }
+
+  // 验证通过，更新密码
+  const { data, error } = await getSupabase().auth.updateUser({
     password: newPassword,
   });
-  
-  if (error) throw error;
-  
-  // 验证当前密码（前端无法直接验证，需要用户重新登录）
-  // 这里简单处理，让用户重新登录
-  return user;
+
+  if (error) {
+    console.error('[updateUserPassword] 更新密码失败:', error.message);
+    throw error;
+  }
+
+  return data.user;
 }
