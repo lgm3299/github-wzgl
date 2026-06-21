@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, DatePicker, Row, Col, Divider, Alert, Steps, Radio } from 'antd';
-import { PlusOutlined, ReloadOutlined, CheckCircleOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
-import { getStocktakingOrders, createStocktakingOrder, updateStocktakingOrder, getMaterials, getInventories, getCurrentUser } from '@/lib/supabase';
+import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, DatePicker, Row, Col, Divider, Alert, Steps, Radio, Popconfirm } from 'antd';
+import { PlusOutlined, ReloadOutlined, CheckCircleOutlined, DownloadOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
+import { getStocktakingOrders, createStocktakingOrder, updateStocktakingOrder, approveStocktakingOrder, deleteStocktakingOrder, getMaterials, getInventories, getCurrentUser } from '@/lib/supabase';
 import { downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
@@ -128,7 +128,7 @@ const StocktakingPage: React.FC = () => {
   const fetchOptions = async () => {
     try {
       const matRes = await getMaterials({ pageSize: 1000 });
-      setMaterials(matRes || []);
+      setMaterials(matRes?.data || []);
 
       // 获取库存数据
       const invRes = await getInventories();
@@ -169,7 +169,7 @@ const StocktakingPage: React.FC = () => {
   };
 
   // 创建盘点单
-  const handleCreateStocktaking = async () => {
+  const handleCreateStocktaking = async (items: any[]) => {
     try {
       const values = await stocktakingForm.validateFields();
 
@@ -185,15 +185,6 @@ const StocktakingPage: React.FC = () => {
         message.warning('没有需要盘点的物资');
         return;
       }
-
-      // 准备盘点明细
-      const items: any[] = targetMaterials.map((mat: any) => ({
-        material_id: mat.id,
-        system_quantity: inventories.get(mat.id) || 0,
-        actual_quantity: 0,
-        difference: 0,
-        remark: '',
-      }));
 
       // 创建盘点单
       const orderData = {
@@ -246,45 +237,27 @@ const StocktakingPage: React.FC = () => {
     }
   };
 
-  // 完成盘点 - 修复逻辑：检查是否已填写（包括0）
+  // 完成盘点 - 调用后端审批函数，自动调整库存
   const handleComplete = async (id: number) => {
     try {
-      const result = await getStocktakingOrders({ page: 1, pageSize: 1000 });
-      const orders = Array.isArray(result) ? result : [];
-      const stocktaking = orders.find((s: any) => s.id === id);
-
-      if (!stocktaking) {
-        message.error('盘点单不存在');
-        return;
-      }
-
-      const items = stocktaking.stocktaking_items || [];
-      // 修复：检查actual_quantity是否已设置（包括0值）
-      const hasUnfilledItems = items.some((item: any) =>
-        item.actual_quantity === null || item.actual_quantity === undefined
-      );
-
-      if (hasUnfilledItems) {
-        message.warning('请确保所有物资都已填写实际盘点数量');
-        return;
-      }
-
-      // 计算差异并更新
-      const updatedItems = items.map((item: any) => ({
-        ...item,
-        difference: (item.actual_quantity || 0) - (item.system_quantity || 0),
-      }));
-
-      await updateStocktakingOrder(id, {
-        status: 'completed',
-        items: updatedItems,
-      });
-
-      message.success('盘点完成，差异已计算');
+      await approveStocktakingOrder(id);
+      message.success('盘点完成，库存已调整');
       fetchData();
     } catch (error: any) {
       console.error('完成盘点失败:', error);
       message.error(error.message || '操作失败');
+    }
+  };
+
+  // 删除盘点单
+  const handleDelete = async (id: number) => {
+    try {
+      await deleteStocktakingOrder(id);
+      message.success('盘点单删除成功，库存已回滚');
+      fetchData();
+    } catch (error: any) {
+      console.error('删除盘点单失败:', error);
+      message.error(error.message || '删除失败');
     }
   };
 
@@ -333,13 +306,22 @@ const StocktakingPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 220,
       render: (_: any, record: any) => (
         <Space>
           <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewDetails(record)}>查看明细</Button>
           {record.status === 'draft' && (
             <Button type="link" size="small" icon={<CheckCircleOutlined />} onClick={() => handleComplete(record.id)}>完成</Button>
           )}
+          <Popconfirm
+            title="确认删除"
+            description="删除盘点单将回滚库存调整，是否继续？"
+            onConfirm={() => handleDelete(record.id)}
+            okText="确认"
+            cancelText="取消"
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -387,7 +369,6 @@ const StocktakingPage: React.FC = () => {
           ...pagination,
           showSizeChanger: true,
           showTotal: (t) => `共 ${t} 条`,
-          showPrevNextButtons: true,
           showQuickJumper: true,
           onChange: (page, pageSize) => fetchData(page, pageSize),
         }}
@@ -434,7 +415,7 @@ interface CreateModalProps {
   setCustomMaterials: (value: number[]) => void;
   currentStep: number;
   setCurrentStep: (step: number) => void;
-  onCreate: () => void;
+  onCreate: (items: any[]) => void;
 }
 
 const CreateStocktakingModal: React.FC<CreateModalProps> = ({
@@ -466,13 +447,13 @@ const CreateStocktakingModal: React.FC<CreateModalProps> = ({
     const items = targetMaterials.map((mat: any) => ({
       material_id: mat.id,
       system_quantity: inventories.get(mat.id) || 0,
-      actual_quantity: actualQuantities.get(mat.id) || 0,
+      actual_quantity: actualQuantities.get(mat.id) ?? 0,
       difference: 0,
       remark: itemRemarks.get(mat.id) || '',
     }));
 
-    // 这里需要将items传递到父组件，简化处理：直接调用onCreate
-    onCreate();
+    // 传递 items 到父组件
+    onCreate(items);
   };
 
   return (

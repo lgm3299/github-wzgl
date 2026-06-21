@@ -601,6 +601,25 @@ export async function completeInboundOrder(id: number) {
 
 export async function deleteInboundOrder(id: number) {
   requireValue(id, 'id');
+
+  // 先查询入库单状态，已审批的单据不能删除
+  const { data: order, error: orderError } = await getSupabase()
+    .from('inbound')
+    .select('status')
+    .eq('id', id)
+    .single();
+
+  if (orderError) {
+    console.error('[deleteInboundOrder] 查询入库单失败:', orderError.message, { id });
+    throw new Error('查询入库单失败: ' + orderError.message);
+  }
+  if (!order) {
+    throw new Error('入库单不存在');
+  }
+  if (order.status === 'approved' || order.status === 'completed') {
+    throw new Error('已审批的入库单不能删除，请先反审核');
+  }
+
   const { error } = await getSupabase()
     .from('inbound')
     .delete()
@@ -843,12 +862,77 @@ export async function completeOutboundOrder(id: number) {
 
 export async function deleteOutboundOrder(id: number) {
   requireValue(id, 'id');
+
+  // 先查询出库单状态及明细
+  const { data: order, error: orderError } = await getSupabase()
+    .from('outbound')
+    .select('status, outbound_items(*)')
+    .eq('id', id)
+    .single();
+
+  if (orderError) {
+    console.error('[deleteOutboundOrder] 查询出库单失败:', orderError.message, { id });
+    throw new Error('查询出库单失败: ' + orderError.message);
+  }
+  if (!order) {
+    throw new Error('出库单不存在');
+  }
+
+  // 如果已审批/已完成，需要先回滚库存
+  if (order.status === 'approved' || order.status === 'completed') {
+    const items = (order as any).outbound_items || [];
+    for (const item of items) {
+      if (!item.material_id || !item.quantity) continue;
+
+      // 查询当前库存
+      const { data: currentInv, error: invError } = await getSupabase()
+        .from('inventory')
+        .select('quantity')
+        .eq('material_id', item.material_id)
+        .single();
+
+      if (invError && invError.code !== 'PGRST116') {
+        console.error('[deleteOutboundOrder] 查询库存失败:', invError.message, { materialId: item.material_id });
+        throw invError;
+      }
+
+      const currentQty = currentInv?.quantity || 0;
+      const newQty = currentQty + item.quantity;
+
+      // 回滚库存（加回出库数量）
+      const { error: upsertError } = await getSupabase()
+        .from('inventory')
+        .upsert({
+          material_id: item.material_id,
+          quantity: newQty,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'material_id' });
+
+      if (upsertError) {
+        console.error('[deleteOutboundOrder] 回滚库存失败:', upsertError.message, { materialId: item.material_id });
+        throw upsertError;
+      }
+    }
+  }
+
+  // 删除出库单（关联的 outbound_items 通过外键级联删除或单独删除）
+  const { error: itemsDeleteError } = await getSupabase()
+    .from('outbound_items')
+    .delete()
+    .eq('outbound_id', id);
+
+  if (itemsDeleteError) {
+    console.error('[deleteOutboundOrder] 删除明细失败:', itemsDeleteError.message, { id });
+    throw itemsDeleteError;
+  }
+
   const { error } = await getSupabase()
     .from('outbound')
     .delete()
     .eq('id', id);
+
   if (error) {
-    console.error('[deleteOutboundOrder] 删除失败:', error.message, { id });
+    console.error('[deleteOutboundOrder] 删除出库单失败:', error.message, { id });
     throw error;
   }
 }
@@ -975,20 +1059,50 @@ export async function getStocktakingOrders(params?: any) {
   return data || [];
 }
 
-export async function createStocktakingOrder(order: Omit<StocktakingOrder, 'id' | 'order_no' | 'created_at' | 'updated_at'>) {
+export async function createStocktakingOrder(order: Omit<StocktakingOrder, 'id' | 'order_no' | 'created_at' | 'updated_at' | 'status' | 'items'> & { status?: string; items?: any[] }) {
   requireValue(order.operator, 'operator');
   const orderNo = generateOrderNo(ORDER_NO_PREFIX.STOCKTAKING);
 
-  const { data, error } = await getSupabase()
+  // 创建盘点单
+  const { data: orderData, error: orderError } = await getSupabase()
     .from('stocktaking')
-    .insert([{ ...order, order_no: orderNo }])
-    .select('*, stocktaking_items(*)')
+    .insert([{
+      order_no: orderNo,
+      operator: order.operator,
+      status: order.status || 'draft',
+      remark: order.remark,
+    }])
+    .select()
     .single();
-  if (error) {
-    console.error('[createStocktakingOrder] 创建失败:', error.message);
-    throw error;
+
+  if (orderError) {
+    console.error('[createStocktakingOrder] 创建盘点单失败:', orderError.message);
+    throw orderError;
   }
-  return data;
+
+  // 创建盘点明细
+  if (order.items && order.items.length > 0) {
+    const items = order.items.map((item: any) => ({
+      stocktaking_id: orderData.id,
+      material_id: requireValue(item.material_id, 'items[].material_id'),
+      system_quantity: item.system_quantity || 0,
+      actual_quantity: item.actual_quantity ?? 0,
+      difference: item.difference || 0,
+      remark: item.remark || '',
+    }));
+
+    const { error: itemsError } = await getSupabase()
+      .from('stocktaking_items')
+      .insert(items);
+
+    if (itemsError) {
+      console.error('[createStocktakingOrder] 插入明细失败，补偿删除盘点单:', itemsError.message, { orderId: orderData.id });
+      await getSupabase().from('stocktaking').delete().eq('id', orderData.id);
+      throw itemsError;
+    }
+  }
+
+  return orderData;
 }
 
 export async function updateStocktakingOrder(id: number, order: Partial<StocktakingOrder>) {
@@ -1004,6 +1118,196 @@ export async function updateStocktakingOrder(id: number, order: Partial<Stocktak
     throw error;
   }
   return data;
+}
+
+/**
+ * 更新盘点明细的实际数量
+ */
+export async function updateStocktakingItemActualQuantity(itemId: number, actualQuantity: number) {
+  requireValue(itemId, 'itemId');
+  const { error } = await getSupabase()
+    .from('stocktaking_items')
+    .update({ actual_quantity: actualQuantity })
+    .eq('id', itemId);
+  if (error) {
+    console.error('[updateStocktakingItemActualQuantity] 更新失败:', error.message, { itemId });
+    throw error;
+  }
+}
+
+/**
+ * 完成盘点并调整库存
+ * 注意：更新库存非原子操作，生产环境建议使用数据库 RPC 事务。
+ */
+export async function approveStocktakingOrder(id: number) {
+  requireValue(id, 'id');
+
+  // 1. 获取盘点单及明细
+  const { data: order, error: orderError } = await getSupabase()
+    .from('stocktaking')
+    .select('*, stocktaking_items(*)')
+    .eq('id', id)
+    .single();
+
+  if (orderError) {
+    console.error('[approveStocktakingOrder] 查询盘点单失败:', orderError.message, { id });
+    throw orderError;
+  }
+  if (!order) {
+    throw new Error('盘点单不存在');
+  }
+
+  const items = (order as any).stocktaking_items || [];
+
+  // 2. 检查是否所有物资都已填写实际数量
+  const hasUnfilled = items.some((item: any) =>
+    item.actual_quantity === null || item.actual_quantity === undefined
+  );
+  if (hasUnfilled) {
+    throw new Error('请确保所有物资都已填写实际盘点数量');
+  }
+
+  // 3. 计算差异并更新明细
+  for (const item of items) {
+    const difference = (item.actual_quantity || 0) - (item.system_quantity || 0);
+    const { error: itemError } = await getSupabase()
+      .from('stocktaking_items')
+      .update({ difference })
+      .eq('id', item.id);
+
+    if (itemError) {
+      console.error('[approveStocktakingOrder] 更新差异失败:', itemError.message, { itemId: item.id });
+      throw itemError;
+    }
+  }
+
+  // 4. 更新盘点单状态为已完成
+  const { error: updateError } = await getSupabase()
+    .from('stocktaking')
+    .update({ status: 'completed' })
+    .eq('id', id);
+
+  if (updateError) {
+    console.error('[approveStocktakingOrder] 更新状态失败:', updateError.message, { id });
+    throw updateError;
+  }
+
+  // 5. 根据差异调整库存
+  for (const item of items) {
+    if (!item.material_id) continue;
+
+    const difference = (item.actual_quantity || 0) - (item.system_quantity || 0);
+    if (difference === 0) continue;
+
+    const { data: currentInv, error: invError } = await getSupabase()
+      .from('inventory')
+      .select('quantity')
+      .eq('material_id', item.material_id)
+      .single();
+
+    if (invError && invError.code !== 'PGRST116') {
+      console.error('[approveStocktakingOrder] 查询库存失败:', invError.message, { materialId: item.material_id });
+      throw invError;
+    }
+
+    const currentQty = currentInv?.quantity || 0;
+    const newQty = currentQty + difference;
+
+    if (newQty < 0) {
+      throw new Error(`库存不足：物资ID=${item.material_id}，当前库存=${currentQty}，需扣减=${-difference}`);
+    }
+
+    const { error: upsertError } = await getSupabase()
+      .from('inventory')
+      .upsert({
+        material_id: item.material_id,
+        quantity: newQty,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'material_id' });
+
+    if (upsertError) {
+      console.error('[approveStocktakingOrder] 更新库存失败:', upsertError.message, { materialId: item.material_id });
+      throw upsertError;
+    }
+  }
+
+  return order;
+}
+
+/**
+ * 删除盘点单并回滚库存
+ */
+export async function deleteStocktakingOrder(id: number) {
+  requireValue(id, 'id');
+
+  // 先查询盘点单状态及明细
+  const { data: order, error: orderError } = await getSupabase()
+    .from('stocktaking')
+    .select('status, stocktaking_items(*)')
+    .eq('id', id)
+    .single();
+
+  if (orderError) {
+    console.error('[deleteStocktakingOrder] 查询盘点单失败:', orderError.message, { id });
+    throw new Error('查询盘点单失败: ' + orderError.message);
+  }
+  if (!order) {
+    throw new Error('盘点单不存在');
+  }
+
+  // 如果已完成，需要回滚库存（反向调整差异）
+  if (order.status === 'completed') {
+    const items = (order as any).stocktaking_items || [];
+    for (const item of items) {
+      if (!item.material_id) continue;
+
+      const difference = (item.actual_quantity || 0) - (item.system_quantity || 0);
+      if (difference === 0) continue;
+
+      // 回滚：反向操作差异
+      const { data: currentInv, error: invError } = await getSupabase()
+        .from('inventory')
+        .select('quantity')
+        .eq('material_id', item.material_id)
+        .single();
+
+      if (invError && invError.code !== 'PGRST116') {
+        console.error('[deleteStocktakingOrder] 查询库存失败:', invError.message, { materialId: item.material_id });
+        throw invError;
+      }
+
+      const currentQty = currentInv?.quantity || 0;
+      const newQty = currentQty - difference; // 反向回滚：如果差异为正（盘盈），则减去；如果差异为负（盘亏），则加回
+
+      if (newQty < 0) {
+        throw new Error(`库存不足，无法回滚：物资ID=${item.material_id}，当前库存=${currentQty}，需回滚=${-difference}`);
+      }
+
+      const { error: upsertError } = await getSupabase()
+        .from('inventory')
+        .upsert({
+          material_id: item.material_id,
+          quantity: newQty,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'material_id' });
+
+      if (upsertError) {
+        console.error('[deleteStocktakingOrder] 回滚库存失败:', upsertError.message, { materialId: item.material_id });
+        throw upsertError;
+      }
+    }
+  }
+
+  // 删除盘点单（stocktaking_items 通过外键级联删除）
+  const { error } = await getSupabase()
+    .from('stocktaking')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('[deleteStocktakingOrder] 删除盘点单失败:', error.message, { id });
+    throw error;
+  }
 }
 
 // ============================================

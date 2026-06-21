@@ -1,7 +1,7 @@
-import React, { useEffect, useState, Suspense, lazy } from 'react';
+import React, { useEffect, useState, Suspense, lazy, Component, ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { ConfigProvider, Spin } from 'antd';
+import { ConfigProvider, Spin, Button, Result } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { getCurrentUser, User } from './lib/supabase';
 import MainLayout from './layouts';
@@ -31,6 +31,58 @@ const PageLoading: React.FC = () => (
   </div>
 );
 
+// 错误边界组件：捕获 React 渲染错误，防止整页白屏
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[ErrorBoundary] 页面渲染错误:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <Result
+            status="error"
+            title="页面加载失败"
+            subTitle={this.state.error?.message || '请检查网络连接后重试'}
+            extra={[
+              <Button
+                type="primary"
+                key="retry"
+                onClick={() => {
+                  this.setState({ hasError: false });
+                  window.location.reload();
+                }}
+              >
+                重新加载
+              </Button>,
+            ]}
+          />
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // 认证保护组件
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -38,7 +90,8 @@ const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
 
   useEffect(() => {
-    let isMounted = true; // 防止组件卸载后设置状态
+    let isMounted = true;
+    let timeoutId: ReturnType<typeof setTimeout>;
     
     const checkAuth = async () => {
       try {
@@ -63,11 +116,20 @@ const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
     };
     
+    // 添加超时保护：如果 10 秒内认证检查未完成，自动设置为未认证
+    timeoutId = setTimeout(() => {
+      if (isMounted && checking) {
+        console.warn('[AuthGuard] 认证检查超时');
+        setChecking(false);
+        setAuthenticated(false);
+      }
+    }, 10000);
+    
     checkAuth();
     
-    // 清理函数：防止内存泄漏
     return () => {
       isMounted = false;
+      clearTimeout(timeoutId);
     };
   }, []);
 
@@ -97,34 +159,36 @@ const App: React.FC = () => {
           },
         }}
       >
-        <Suspense fallback={<PageLoading />}>
-          <Routes>
-            {/* 公开路由 */}
-            <Route path="/login" element={<LoginPage />} />
-            
-            {/* 受保护的路由 */}
-            <Route path="/" element={
-              <AuthGuard>
-                <MainLayout />
-              </AuthGuard>
-            }>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="materials" element={<MaterialsPage />} />
-              <Route path="suppliers" element={<SuppliersPage />} />
-              <Route path="inbound" element={<InboundPage />} />
-              <Route path="outbound" element={<OutboundPage />} />
-              <Route path="inventory" element={<InventoryPage />} />
-              <Route path="stocktaking" element={<StocktakingPage />} />
-              <Route path="reports" element={<ReportsPage />} />
-              <Route path="admin" element={<AdminPage />} />
-              <Route path="guide" element={<GuidePage />} />
-            </Route>
-            
-            {/* 404 页面 */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
+              {/* 公开路由 */}
+              <Route path="/login" element={<LoginPage />} />
+              
+              {/* 受保护的路由 */}
+              <Route path="/" element={
+                <AuthGuard>
+                  <MainLayout />
+                </AuthGuard>
+              }>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="materials" element={<MaterialsPage />} />
+                <Route path="suppliers" element={<SuppliersPage />} />
+                <Route path="inbound" element={<InboundPage />} />
+                <Route path="outbound" element={<OutboundPage />} />
+                <Route path="inventory" element={<InventoryPage />} />
+                <Route path="stocktaking" element={<StocktakingPage />} />
+                <Route path="reports" element={<ReportsPage />} />
+                <Route path="admin" element={<AdminPage />} />
+                <Route path="guide" element={<GuidePage />} />
+              </Route>
+              
+              {/* 404 页面 */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </ConfigProvider>
     </BrowserRouter>
   );

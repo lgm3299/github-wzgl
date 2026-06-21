@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Typography, Button, Space, message, DatePicker, Select, Popconfirm } from 'antd';
-import { ReloadOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons';
-import { getInventories, getCategories, deleteInventory } from '@/lib/supabase';
+import { Table, Tag, Typography, Button, Space, message, DatePicker, Select } from 'antd';
+import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { getInventories, getCategories } from '@/lib/supabase';
 import { downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
@@ -13,7 +13,6 @@ const EXPORT_COLUMNS = [
   { key: 'name', label: '物资名称' },
   { key: 'category', label: '分类' },
   { key: 'quantity', label: '当前库存' },
-  { key: 'location', label: '存放位置' },
   { key: 'updated_at', label: '更新时间' },
 ];
 
@@ -62,19 +61,6 @@ const InventoryPage: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  // 删除库存记录
-  const handleDelete = async (id: number) => {
-    try {
-      await deleteInventory(id);
-      message.success('删除成功');
-      fetchData();
-    } catch (error: any) {
-      console.error('删除库存失败:', error);
-      const errorMessage = error?.message || error?.hint || '删除失败';
-      message.error(`删除失败：${errorMessage}`);
-    }
-  };
-
   // 导出库存数据
   const handleExport = () => {
     const exportData = data.map(item => ({
@@ -82,7 +68,6 @@ const InventoryPage: React.FC = () => {
       name: item.material?.name || '',
       category: item.material?.categories?.name || '',
       quantity: item.quantity,
-      location: item.location || '',
       updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
     }));
     downloadCSV(exportData, EXPORT_COLUMNS, '库存数据');
@@ -116,28 +101,11 @@ const InventoryPage: React.FC = () => {
       render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>,
     },
     {
-      title: '存放位置',
-      dataIndex: 'location',
-      key: 'location',
-      width: 120,
-      render: (text: string) => text || '-',
-    },
-    {
       title: '更新时间',
       dataIndex: 'updated_at',
       key: 'updated_at',
       width: 180,
       render: (date: string) => date ? new Date(date).toLocaleString() : '-',
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 100,
-      render: (_: any, record: any) => (
-        <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
-          <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
-        </Popconfirm>
-      ),
     },
   ];
 

@@ -119,7 +119,7 @@ const MaterialsPage: React.FC = () => {
     setModalOpen(true);
   };
 
-  // 生成物资编码
+  // 生成物资编码（自动递增，大小写不敏感匹配）
   const generateCode = async () => {
     try {
       const result = await getMaterials({ pageSize: 1000 });
@@ -127,8 +127,12 @@ const MaterialsPage: React.FC = () => {
 
       let maxNum = 0;
       materials.forEach((item: any) => {
-        if (item.code && item.code.startsWith('WZ')) {
-          const num = parseInt(item.code.replace('WZ', ''));
+        const code = item.code;
+        if (!code) return;
+        // 大小写不敏感匹配 WZ 开头的数字编码
+        const upperCode = String(code).toUpperCase();
+        if (upperCode.startsWith('WZ')) {
+          const num = parseInt(upperCode.replace('WZ', ''), 10);
           if (!isNaN(num) && num > maxNum) {
             maxNum = num;
           }

@@ -423,29 +423,40 @@ const InboundPage: React.FC = () => {
 
   // 主表格列（每行是一张入库单）
   const columns = [
-    { title: '入库单号', dataIndex: 'order_no', key: 'order_no', width: 180 },
-    { title: '供应商', dataIndex: ['suppliers', 'name'], key: 'supplier', width: 140 },
-    { title: '操作人', dataIndex: 'operator', key: 'operator', width: 90 },
+    { title: '入库单号', dataIndex: 'order_no', key: 'order_no', width: 150 },
+    { title: '供应商', dataIndex: ['suppliers', 'name'], key: 'supplier', width: 120, render: (v: any) => v || '-' },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 90,
-      render: (s: string) => {
-        const st = statusMap[s] || { color: 'default', text: s };
-        return <Tag color={st.color}>{st.text}</Tag>;
+      title: '物资名称',
+      key: 'material_names',
+      width: 160,
+      render: (_: any, record: any) => {
+        const items = record.inbound_items || [];
+        if (items.length === 0) return '-';
+        const names = items.map((item: any) => item.materials?.name || '未知物资');
+        const display = names.slice(0, 2).join('，');
+        return (
+          <span>
+            {display}
+            {names.length > 2 && ` 等 ${names.length} 种`}
+          </span>
+        );
       },
     },
     {
-      title: '物资种类',
-      key: 'item_count',
-      width: 90,
+      title: '数量',
+      key: 'total_quantity',
+      width: 80,
       render: (_: any, record: any) => {
-        const count = record.inbound_items?.length || 0;
-        return <span>{count} 种</span>;
+        const items = record.inbound_items || [];
+        if (items.length === 0) return '-';
+        const totalQty = items.reduce((sum: number, item: any) => sum + (Number(item.quantity) || 0), 0);
+        return <span>{totalQty}</span>;
       },
     },
     {
       title: '总金额(元)',
       key: 'total',
-      width: 110,
+      width: 100,
       render: (_: any, record: any) => {
         const total = (record.inbound_items || []).reduce(
           (sum: number, item: any) => sum + (Number(item.total_amount) || 0), 0
@@ -454,8 +465,16 @@ const InboundPage: React.FC = () => {
       },
     },
     {
-      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160,
-      render: (date: string) => new Date(date).toLocaleString(),
+      title: '状态', dataIndex: 'status', key: 'status', width: 80,
+      render: (s: string) => {
+        const st = statusMap[s] || { color: 'default', text: s };
+        return <Tag color={st.color}>{st.text}</Tag>;
+      },
+    },
+    { title: '操作人', dataIndex: 'operator', key: 'operator', width: 80 },
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 140,
+      render: (date: string) => date ? new Date(date).toLocaleString() : '-',
     },
     {
       title: '操作', key: 'action', width: 240, fixed: 'right' as const,
