@@ -160,8 +160,6 @@ const OutboundPage: React.FC = () => {
             outbound_id: orderId,
             material_id: row.id,
             quantity,
-            unit_price: row.price || 0,
-            total_amount: quantity * (row.price || 0),
           }]);
 
         if (itemError) throw itemError;
