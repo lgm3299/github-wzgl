@@ -215,7 +215,7 @@ export interface Supplier {
 
 export async function getSuppliers(params?: any) {
   const pg = getPaginationParams(params);
-  let query = getSupabase().from('suppliers').select('*', pg ? { count: 'exact', head: true } : undefined);
+  let query = getSupabase().from('suppliers').select('*');
 
   if (params?.keyword) {
     query = query.ilike('name', `%${params.keyword}%`);
@@ -225,15 +225,29 @@ export async function getSuppliers(params?: any) {
     query = query.range(pg.start, pg.end);
   }
 
-  const { data, error, count } = await query.order('created_at', { ascending: false });
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) {
     console.error('[getSuppliers] 查询失败:', error.message);
     throw error;
   }
 
+  // 单独查询总数（不使用 head: true）
+  let total = 0;
+  if (pg) {
+    const { count, error: countError } = await getSupabase()
+      .from('suppliers')
+      .select('*', { count: 'exact', head: false });
+    if (countError) {
+      console.error('[getSuppliers] 查询总数失败:', countError.message);
+    }
+    total = count || 0;
+  } else {
+    total = (data || []).length;
+  }
+
   return {
     data: data || [],
-    total: count || 0,
+    total,
   };
 }
 
@@ -302,7 +316,7 @@ export async function getMaterials(params?: any) {
   const pg = getPaginationParams(params);
   let query = getSupabase()
     .from('materials')
-    .select('*, categories(name)', pg ? { count: 'exact', head: true } : undefined);
+    .select('*, categories(name)');
 
   if (params?.keyword) {
     query = query.or(`name.ilike.%${params.keyword}%,code.ilike.%${params.keyword}%`);
@@ -322,15 +336,29 @@ export async function getMaterials(params?: any) {
     query = query.range(pg.start, pg.end);
   }
 
-  const { data, error, count } = await query.order('created_at', { ascending: false });
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) {
     console.error('[getMaterials] 查询失败:', error.message);
     throw error;
   }
 
+  // 单独查询总数（不使用 head: true，避免 HEAD 请求被 RLS 阻止）
+  let total = 0;
+  if (pg) {
+    const { count, error: countError } = await getSupabase()
+      .from('materials')
+      .select('*', { count: 'exact', head: false });
+    if (countError) {
+      console.error('[getMaterials] 查询总数失败:', countError.message);
+    }
+    total = count || 0;
+  } else {
+    total = (data || []).length;
+  }
+
   return {
     data: data || [],
-    total: count || 0,
+    total,
   };
 }
 
@@ -1361,10 +1389,10 @@ export async function getDashboardStats() {
       { count: inboundCount },
       { count: outboundCount },
     ] = await Promise.all([
-      getSupabase().from('materials').select('*', { count: 'exact', head: true }),
-      getSupabase().from('suppliers').select('*', { count: 'exact', head: true }),
-      getSupabase().from('inbound').select('*', { count: 'exact', head: true }),
-      getSupabase().from('outbound').select('*', { count: 'exact', head: true }),
+      getSupabase().from('materials').select('*', { count: 'exact', head: false }),
+      getSupabase().from('suppliers').select('*', { count: 'exact', head: false }),
+      getSupabase().from('inbound').select('*', { count: 'exact', head: false }),
+      getSupabase().from('outbound').select('*', { count: 'exact', head: false }),
     ]);
 
     const now = new Date();
@@ -1374,8 +1402,8 @@ export async function getDashboardStats() {
       { count: inboundThisMonth },
       { count: outboundThisMonth },
     ] = await Promise.all([
-      getSupabase().from('inbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
-      getSupabase().from('outbound').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+      getSupabase().from('inbound').select('*', { count: 'exact', head: false }).gte('created_at', monthStart),
+      getSupabase().from('outbound').select('*', { count: 'exact', head: false }).gte('created_at', monthStart),
     ]);
 
     let warningCount = 0;
