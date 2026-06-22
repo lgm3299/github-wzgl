@@ -7,7 +7,7 @@ import {
   PlusOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined,
   DownloadOutlined, MinusCircleOutlined, SendOutlined
 } from '@ant-design/icons';
-import { getRecycleOrders, createRecycleOrder, updateRecycleOrderStatus, deleteRecycleOrder, getMaterials, getCurrentUser, getInventories, getMaterialOutboundQuantity } from '@/lib/supabase';
+import { getRecycleOrders, createRecycleOrder, updateRecycleOrderStatus, deleteRecycleOrder, getMaterials, getCurrentUser, getAllOutboundQuantities } from '@/lib/supabase';
 import { downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
@@ -85,12 +85,15 @@ const RecyclePage: React.FC = () => {
     }
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     form.resetFields();
     setItems([{ material_id: '', quantity: 1 }]);
     if (currentUser?.full_name) {
       form.setFieldsValue({ operator: currentUser.full_name });
     }
+    // 预加载所有物资的出库数量
+    const qtyMap = await getAllOutboundQuantities();
+    setOutboundQuantities(Object.fromEntries(qtyMap));
     setModalOpen(true);
   };
 
@@ -106,15 +109,6 @@ const RecyclePage: React.FC = () => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
-    
-    // 如果选择了物资，查询该物资的出库数量
-    if (field === 'material_id' && value) {
-      getMaterialOutboundQuantity(value).then(quantity => {
-        setOutboundQuantities(prev => ({ ...prev, [value]: quantity }));
-      }).catch(error => {
-        console.error('获取出库数量失败:', error);
-      });
-    }
   };
 
   const handleSubmit = async () => {
@@ -388,21 +382,24 @@ const RecyclePage: React.FC = () => {
             {items.map((item, index) => {
               const selectedMat = materials.find(m => m.id === item.material_id);
               const unit = selectedMat?.unit || '个';
+              // 只显示有出库记录的物资
+              const outboundMaterials = materials.filter(m => (outboundQuantities[m.id] || 0) > 0);
               return (
                 <div key={index} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                   <span style={{ width: 28, textAlign: 'center', color: '#999', flexShrink: 0 }}>{index + 1}.</span>
                   <div style={{ flex: 2 }}>
                     <Select
-                      placeholder="选择物资"
+                      placeholder={outboundMaterials.length === 0 ? '无已出库物资' : '选择物资'}
                       value={item.material_id || undefined}
                       onChange={(value) => handleItemChange(index, 'material_id', value)}
                       showSearch
                       optionFilterProp="children"
                       style={{ width: '100%' }}
+                      notFoundContent="暂无已出库物资，请先完成出库操作"
                     >
-                      {materials.map((m: any) => (
+                      {outboundMaterials.map((m: any) => (
                         <Option key={m.id} value={m.id}>
-                          {m.name}（{m.code}）出库数量: {outboundQuantities[m.id] || 0}{m.unit || '个'}
+                          {m.name}（{m.code}）出库: {outboundQuantities[m.id]}{m.unit || '个'}
                         </Option>
                       ))}
                     </Select>
@@ -413,6 +410,7 @@ const RecyclePage: React.FC = () => {
                       value={item.quantity}
                       onChange={(value) => handleItemChange(index, 'quantity', value)}
                       min={1}
+                      max={item.material_id ? (outboundQuantities[item.material_id] || 0) : undefined}
                       style={{ width: '100%' }}
                       addonAfter={unit}
                     />

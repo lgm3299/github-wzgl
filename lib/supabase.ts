@@ -1768,40 +1768,44 @@ export async function getMaterialOutboundQuantity(materialId: number): Promise<n
   requireValue(materialId, 'materialId');
 
   try {
-    // 先查该物资已审批出库单的ID（只统计已审批的）
-    const { data: approvedOrders, error: orderError } = await getSupabase()
-      .from('outbound')
-      .select('id')
-      .in('status', ['approved', 'completed']);
-
-    if (orderError) {
-      console.error('[getMaterialOutboundQuantity] 查询出库单失败:', orderError.message);
-      return 0;
-    }
-
-    if (!approvedOrders || approvedOrders.length === 0) return 0;
-
-    const orderIds = approvedOrders.map((o: any) => o.id);
-
-    // 查这些出库单中该物资的出库总量
+    // 使用 RPC 函数（SECURITY DEFINER）绕过 RLS
     const { data, error } = await getSupabase()
-      .from('outbound_items')
-      .select('quantity')
-      .eq('material_id', materialId)
-      .in('outbound_id', orderIds);
+      .rpc('get_material_outbound_qty', { material_id_param: materialId });
 
     if (error) {
-      console.error('[getMaterialOutboundQuantity] 查询失败:', error.message);
+      console.error('[getMaterialOutboundQuantity] RPC 失败:', error.message);
       return 0;
     }
 
-    if (!data || data.length === 0) return 0;
-
-    const total = data.reduce((sum: number, item: any) => sum + (Number(item.quantity) || 0), 0);
-    return total;
+    return Number(data) || 0;
   } catch (error: any) {
     console.error('[getMaterialOutboundQuantity] 异常:', error.message);
     return 0;
+  }
+}
+
+/**
+ * 获取所有已出库物资及其出库总量
+ * 用于回收单选择物资时只显示有出库记录的物资
+ */
+export async function getAllOutboundQuantities(): Promise<Map<number, number>> {
+  try {
+    const { data, error } = await getSupabase()
+      .rpc('get_all_outbound_quantities');
+
+    if (error) {
+      console.error('[getAllOutboundQuantities] RPC 失败:', error.message);
+      return new Map();
+    }
+
+    const result = new Map<number, number>();
+    (data || []).forEach((row: any) => {
+      result.set(row.material_id, Number(row.total_quantity) || 0);
+    });
+    return result;
+  } catch (error: any) {
+    console.error('[getAllOutboundQuantities] 异常:', error.message);
+    return new Map();
   }
 }
 
