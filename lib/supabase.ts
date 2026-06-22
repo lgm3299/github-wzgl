@@ -1032,10 +1032,10 @@ export async function completeOutboundOrder(id: number) {
 export async function deleteOutboundOrder(id: number) {
   requireValue(id, 'id');
 
-  // 先查询出库单状态及明细
+  // 先查询出库单状态（不含明细，避免关联查询被RLS阻止）
   const { data: order, error: orderError } = await getSupabase()
     .from('outbound')
-    .select('status, outbound_items(*)')
+    .select('id, status')
     .eq('id', id)
     .single();
 
@@ -1049,8 +1049,19 @@ export async function deleteOutboundOrder(id: number) {
 
   // 如果已审批/已完成，需要先回滚库存
   if (order.status === 'approved' || order.status === 'completed') {
-    const items = (order as any).outbound_items || [];
-    for (const item of items) {
+    // 单独查询出库明细
+    const { data: items, error: itemsError } = await getSupabase()
+      .from('outbound_items')
+      .select('material_id, quantity')
+      .eq('outbound_id', id);
+
+    if (itemsError) {
+      console.error('[deleteOutboundOrder] 查询明细失败:', itemsError.message, { id });
+      throw itemsError;
+    }
+
+    const outboundItems = (items || []) as any[];
+    for (const item of outboundItems) {
       if (!item.material_id || !item.quantity) continue;
 
       // 查询当前库存
@@ -1422,10 +1433,10 @@ export async function updateStocktakingItemActualQuantity(itemId: number, actual
 export async function approveStocktakingOrder(id: number) {
   requireValue(id, 'id');
 
-  // 1. 获取盘点单及明细
+  // 1. 获取盘点单（不含明细，避免关联查询被RLS阻止）
   const { data: order, error: orderError } = await getSupabase()
     .from('stocktaking')
-    .select('*, stocktaking_items(*)')
+    .select('*')
     .eq('id', id)
     .single();
 
@@ -1437,10 +1448,21 @@ export async function approveStocktakingOrder(id: number) {
     throw new Error('盘点单不存在');
   }
 
-  const items = (order as any).stocktaking_items || [];
+  // 1.5 单独查询盘点明细
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('stocktaking_items')
+    .select('*')
+    .eq('stocktaking_id', id);
+
+  if (itemsError) {
+    console.error('[approveStocktakingOrder] 查询明细失败:', itemsError.message, { id });
+    throw itemsError;
+  }
+
+  const stocktakingItems = (items || []) as any[];
 
   // 2. 检查是否所有物资都已填写实际数量
-  const hasUnfilled = items.some((item: any) =>
+  const hasUnfilled = stocktakingItems.some((item: any) =>
     item.actual_quantity === null || item.actual_quantity === undefined
   );
   if (hasUnfilled) {
@@ -1448,7 +1470,7 @@ export async function approveStocktakingOrder(id: number) {
   }
 
   // 3. 计算差异并更新明细
-  for (const item of items) {
+  for (const item of stocktakingItems) {
     const difference = (item.actual_quantity || 0) - (item.system_quantity || 0);
     const { error: itemError } = await getSupabase()
       .from('stocktaking_items')
@@ -1473,7 +1495,7 @@ export async function approveStocktakingOrder(id: number) {
   }
 
   // 5. 根据差异调整库存
-  for (const item of items) {
+  for (const item of stocktakingItems) {
     if (!item.material_id) continue;
 
     const difference = (item.actual_quantity || 0) - (item.system_quantity || 0);
