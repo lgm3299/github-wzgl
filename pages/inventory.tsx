@@ -11,7 +11,6 @@ const { RangePicker } = DatePicker;
 const EXPORT_COLUMNS = [
   { key: 'code', label: '物资编码' },
   { key: 'name', label: '物资名称' },
-  { key: 'category', label: '分类' },
   { key: 'quantity', label: '当前库存' },
   { key: 'updated_at', label: '更新时间' },
 ];
@@ -91,12 +90,6 @@ const InventoryPage: React.FC = () => {
       key: 'name',
       width: 150,
       render: (_: any, record: any) => record.material?.name || '-',
-    },
-    {
-      title: '分类',
-      key: 'category',
-      width: 100,
-      render: (_: any, record: any) => record.material?.categories?.name || '-',
     },
     {
       title: '当前库存',

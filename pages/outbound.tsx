@@ -73,7 +73,7 @@ const OutboundPage: React.FC = () => {
   const loadHistory = async () => {
     setHistoryLoading(true);
     try {
-      const orders = await getOutboundOrders({ pageSize: 1000 });
+      const orders = await getOutboundOrders({ page: 1, pageSize: 1000 });
 
       const flatData: any[] = [];
 
@@ -194,7 +194,7 @@ const OutboundPage: React.FC = () => {
       return;
     }
 
-    const { recipient, purpose, remark } = values;
+    const { recipient, purpose, remark, order_date } = values;
     const operator = currentUser?.full_name || currentUser?.email || '系统';
     const orderNo = generateOrderNo();
 
@@ -209,6 +209,7 @@ const OutboundPage: React.FC = () => {
           status: 'approved',
           purpose: purpose || '批量出库',
           remark,
+          order_date: order_date?.format?.('YYYY-MM-DD') || new Date().toISOString().split('T')[0],
         }])
         .select()
         .single();
@@ -338,14 +339,19 @@ const OutboundPage: React.FC = () => {
         />
         <Form form={batchForm} layout="vertical" onFinish={handleBatchOutbound}>
           <Row gutter={16}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="recipient" label="领用人" rules={[{ required: true, message: '请输入领用人' }]}>
                 <Input placeholder="请输入领用人姓名" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="purpose" label="用途说明">
                 <Input placeholder="请输入用途说明（可选）" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="order_date" label="出库日期" rules={[{ required: true, message: '请选择出库日期' }]}>
+                <DatePicker style={{ width: '100%' }} placeholder="选择日期" />
               </Form.Item>
             </Col>
           </Row>

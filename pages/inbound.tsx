@@ -218,6 +218,7 @@ const InboundPage: React.FC = () => {
         supplier_id: values.supplier_id,
         operator: values.operator,
         remark: values.remark,
+        order_date: values.order_date?.format?.('YYYY-MM-DD'),
         items: validItems.map(item => ({
           material_id: item.material_id,
           quantity: item.quantity,
@@ -585,25 +586,30 @@ const InboundPage: React.FC = () => {
         cancelText="取消"
       >
         <Form form={form} layout="vertical">
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: '请选择供应商' }]}>
-                <Select placeholder="请选择供应商" showSearch optionFilterProp="children"
-                  filterOption={(input, option) =>
-                    (option?.children ?? '').toLowerCase().includes(input.toLowerCase())
-                  }>
-                  {suppliers.map((s: any) => (
-                    <Option key={s.id} value={s.id}>{s.name}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '请输入操作人' }]}>
-                <Input placeholder="自动填入" readOnly />
-              </Form.Item>
-            </Col>
-          </Row>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: '请选择供应商' }]}>
+              <Select placeholder="请选择供应商" showSearch optionFilterProp="children"
+                filterOption={(input, option) =>
+                  (option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                }>
+                {suppliers.map((s: any) => (
+                  <Option key={s.id} value={s.id}>{s.name}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '请输入操作人' }]}>
+              <Input placeholder="自动填入" readOnly />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="order_date" label="入库日期" rules={[{ required: true, message: '请选择入库日期' }]}>
+              <DatePicker style={{ width: '100%' }} placeholder="选择日期" />
+            </Form.Item>
+          </Col>
+        </Row>
 
           <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontWeight: 500, fontSize: 14 }}>

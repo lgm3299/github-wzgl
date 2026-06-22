@@ -7,7 +7,7 @@ import {
   PlusOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined,
   DownloadOutlined, MinusCircleOutlined, SendOutlined
 } from '@ant-design/icons';
-import { getRecycleOrders, createRecycleOrder, updateRecycleOrderStatus, deleteRecycleOrder, getMaterials, getCurrentUser, getInventories } from '@/lib/supabase';
+import { getRecycleOrders, createRecycleOrder, updateRecycleOrderStatus, deleteRecycleOrder, getMaterials, getCurrentUser, getInventories, getMaterialOutboundQuantity } from '@/lib/supabase';
 import { downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
@@ -33,6 +33,7 @@ const RecyclePage: React.FC = () => {
   const [items, setItems] = useState<any[]>([]);
   const [dateRange, setDateRange] = useState<[any, any] | null>(null);
   const [selectedRows, setSelectedRows] = useState<any[]>([]);
+  const [outboundQuantities, setOutboundQuantities] = useState<Record<number, number>>({});
 
   const fetchData = async (page = 1, pageSize = 20) => {
     setLoading(true);
@@ -105,6 +106,15 @@ const RecyclePage: React.FC = () => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
+    
+    // 如果选择了物资，查询该物资的出库数量
+    if (field === 'material_id' && value) {
+      getMaterialOutboundQuantity(value).then(quantity => {
+        setOutboundQuantities(prev => ({ ...prev, [value]: quantity }));
+      }).catch(error => {
+        console.error('获取出库数量失败:', error);
+      });
+    }
   };
 
   const handleSubmit = async () => {
@@ -392,7 +402,7 @@ const RecyclePage: React.FC = () => {
                     >
                       {materials.map((m: any) => (
                         <Option key={m.id} value={m.id}>
-                          {m.name}（{m.code}）库存: {inventories.get(m.id) || 0}{m.unit || '个'}
+                          {m.name}（{m.code}）出库数量: {outboundQuantities[m.id] || 0}{m.unit || '个'}
                         </Option>
                       ))}
                     </Select>

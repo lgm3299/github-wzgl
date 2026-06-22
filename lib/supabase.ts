@@ -416,6 +416,7 @@ export interface InboundOrder {
   operator: string;
   status: string;
   remark?: string;
+  order_date?: string;
   created_at: string;
   updated_at: string;
   items?: InboundItem[];
@@ -524,6 +525,7 @@ export async function createInboundOrder(order: Omit<InboundOrder, 'id' | 'order
       operator: order.operator,
       status: order.status || 'draft',
       remark: order.remark,
+      order_date: order.order_date || new Date().toISOString().split('T')[0],
     }])
     .select()
     .single();
@@ -720,6 +722,7 @@ export interface OutboundOrder {
   status: string;
   purpose?: string;
   remark?: string;
+  order_date?: string;
   created_at: string;
   updated_at: string;
   items?: OutboundItem[];
@@ -809,6 +812,7 @@ export async function createOutboundOrder(order: Omit<OutboundOrder, 'id' | 'ord
       status: order.status || 'draft',
       purpose: order.purpose,
       remark: order.remark,
+      order_date: order.order_date || new Date().toISOString().split('T')[0],
     }])
     .select()
     .single();
@@ -1243,11 +1247,34 @@ export async function getStocktakingOrders(params?: any) {
     console.error('[getStocktakingOrders] 查询明细失败:', itemsError.message);
   }
 
+  // 查询物资信息
+  const materialIds = [...new Set((items || []).map((item: any) => item.material_id).filter(Boolean))];
+  const { data: materialsData, error: matError } = await getSupabase()
+    .from('materials')
+    .select('id, name, code, unit')
+    .in('id', materialIds);
+
+  if (matError) {
+    console.error('[getStocktakingOrders] 查询物资失败:', matError.message);
+  }
+
+  const materialMap: Record<number, any> = {};
+  (materialsData || []).forEach((mat: any) => {
+    materialMap[mat.id] = {
+      name: mat.name || '未知物资',
+      code: mat.code || '-',
+      unit: mat.unit || '个',
+    };
+  });
+
   const itemsByOrderId: Record<number, any[]> = {};
   (items || []).forEach((item: any) => {
     const oid = item.stocktaking_id;
     if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
-    itemsByOrderId[oid].push(item);
+    itemsByOrderId[oid].push({
+      ...item,
+      materials: item.material_id ? materialMap[item.material_id] || null : null,
+    });
   });
 
   return orders.map((order: any) => ({
@@ -1537,14 +1564,35 @@ export async function getRecycleOrders(params?: any) {
 
   const orderIds = orders.map((o: any) => o.id);
 
+  // 单独查询回收明细
   const { data: items, error: itemsError } = await getSupabase()
     .from('recycle_items')
-    .select('*, materials(name, code, unit)')
+    .select('*')
     .in('recycle_id', orderIds);
 
   if (itemsError) {
     console.error('[getRecycleOrders] 查询明细失败:', itemsError.message);
   }
+
+  // 查询物资信息
+  const materialIds = [...new Set((items || []).map((item: any) => item.material_id).filter(Boolean))];
+  const { data: materialsData, error: matError } = await getSupabase()
+    .from('materials')
+    .select('id, name, code, unit')
+    .in('id', materialIds);
+
+  if (matError) {
+    console.error('[getRecycleOrders] 查询物资失败:', matError.message);
+  }
+
+  const materialMap: Record<number, any> = {};
+  (materialsData || []).forEach((mat: any) => {
+    materialMap[mat.id] = {
+      name: mat.name || '未知物资',
+      code: mat.code || '-',
+      unit: mat.unit || '个',
+    };
+  });
 
   const itemsByOrderId: Record<number, any[]> = {};
   (items || []).forEach((item: any) => {
@@ -1552,11 +1600,7 @@ export async function getRecycleOrders(params?: any) {
     if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
     itemsByOrderId[oid].push({
       ...item,
-      materials: item.materials ? {
-        name: item.materials.name || '未知物资',
-        code: item.materials.code || '-',
-        unit: item.materials.unit || '个',
-      } : null,
+      materials: item.material_id ? materialMap[item.material_id] || null : null,
     });
   });
 
@@ -1641,6 +1685,30 @@ export async function deleteRecycleOrder(id: number) {
 // ============================================
 // 用量统计函数
 // ============================================
+
+export async function getMaterialOutboundQuantity(materialId: number): Promise<number> {
+  requireValue(materialId, 'materialId');
+  
+  try {
+    const { data, error } = await getSupabase()
+      .from('outbound_items')
+      .select('quantity')
+      .eq('material_id', materialId);
+    
+    if (error) {
+      console.error('[getMaterialOutboundQuantity] 查询失败:', error.message);
+      return 0;
+    }
+    
+    if (!data || data.length === 0) return 0;
+    
+    const total = data.reduce((sum: number, item: any) => sum + (Number(item.quantity) || 0), 0);
+    return total;
+  } catch (error: any) {
+    console.error('[getMaterialOutboundQuantity] 异常:', error.message);
+    return 0;
+  }
+}
 
 export async function getOutboundUsageStats(startDate?: string, endDate?: string) {
   try {
