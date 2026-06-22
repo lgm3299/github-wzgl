@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, Row, Col, Upload, Divider, DatePicker, Alert, Checkbox } from 'antd';
 import { ReloadOutlined, DownloadOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
-import { getMaterials, getInventories, getCurrentUser, supabase } from '@/lib/supabase';
+import { getMaterials, getInventories, getCurrentUser, getOutboundOrders, supabase } from '@/lib/supabase';
 import { downloadCSV, downloadTemplate } from '@/lib/importExport';
 
 const { Title } = Typography;
@@ -73,14 +73,8 @@ const OutboundPage: React.FC = () => {
   const loadHistory = async () => {
     setHistoryLoading(true);
     try {
-      const result = await supabase
-        .from('outbound')
-        .select('*, outbound_items(*, materials(name, code))')
-        .order('created_at', { ascending: false });
+      const orders = await getOutboundOrders({ pageSize: 1000 });
 
-      if (result.error) throw result.error;
-
-      const orders = result.data || [];
       const flatData: any[] = [];
 
       for (const order of orders) {
@@ -106,7 +100,7 @@ const OutboundPage: React.FC = () => {
       setHistoryData(flatData);
       setHistoryModalOpen(true);
     } catch (error: any) {
-      message.error('加载历史记录失败');
+      message.error('加载历史记录失败: ' + (error.message || '未知错误'));
     } finally {
       setHistoryLoading(false);
     }

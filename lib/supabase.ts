@@ -435,7 +435,7 @@ export async function getInboundOrders(params?: any) {
   const pg = getPaginationParams(params);
   let query = getSupabase()
     .from('inbound')
-    .select('*, suppliers(name), inbound_items(*, materials(name, code))');
+    .select('*');
 
   if (params?.status) {
     query = query.eq('status', params.status);
@@ -447,12 +447,60 @@ export async function getInboundOrders(params?: any) {
     query = query.range(pg.start, pg.end);
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data: orders, error } = await query.order('created_at', { ascending: false });
   if (error) {
     console.error('[getInboundOrders] 查询失败:', error.message);
     throw error;
   }
-  return data || [];
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = orders.map((o: any) => o.id);
+
+  // 单独查询入库明细和关联物资
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('inbound_items')
+    .select('*, materials(name, code)')
+    .in('inbound_id', orderIds);
+
+  if (itemsError) {
+    console.error('[getInboundOrders] 查询明细失败:', itemsError.message);
+  }
+
+  // 单独查询供应商
+  const supplierIds = [...new Set(orders.map((o: any) => o.supplier_id).filter(Boolean))];
+  const { data: suppliersData, error: supError } = await getSupabase()
+    .from('suppliers')
+    .select('id, name')
+    .in('id', supplierIds);
+
+  if (supError) {
+    console.error('[getInboundOrders] 查询供应商失败:', supError.message);
+  }
+
+  const supplierMap: Record<number, any> = {};
+  (suppliersData || []).forEach((s: any) => {
+    supplierMap[s.id] = { name: s.name || '-' };
+  });
+
+  const itemsByOrderId: Record<number, any[]> = {};
+  (items || []).forEach((item: any) => {
+    const oid = item.inbound_id;
+    if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
+    itemsByOrderId[oid].push({
+      ...item,
+      materials: item.materials ? {
+        name: item.materials.name || '未知物资',
+        code: item.materials.code || '-',
+      } : null,
+    });
+  });
+
+  return orders.map((order: any) => ({
+    ...order,
+    suppliers: supplierMap[order.supplier_id] || { name: '-' },
+    inbound_items: itemsByOrderId[order.id] || [],
+  }));
 }
 
 /**
@@ -689,7 +737,7 @@ export async function getOutboundOrders(params?: any) {
   const pg = getPaginationParams(params);
   let query = getSupabase()
     .from('outbound')
-    .select('*, outbound_items(*, materials(name, code))');
+    .select('*');
 
   if (params?.status) {
     query = query.eq('status', params.status);
@@ -701,12 +749,43 @@ export async function getOutboundOrders(params?: any) {
     query = query.range(pg.start, pg.end);
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data: orders, error } = await query.order('created_at', { ascending: false });
   if (error) {
     console.error('[getOutboundOrders] 查询失败:', error.message);
     throw error;
   }
-  return data || [];
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = orders.map((o: any) => o.id);
+
+  // 单独查询出库明细和关联物资
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('outbound_items')
+    .select('*, materials(name, code)')
+    .in('outbound_id', orderIds);
+
+  if (itemsError) {
+    console.error('[getOutboundOrders] 查询明细失败:', itemsError.message);
+  }
+
+  const itemsByOrderId: Record<number, any[]> = {};
+  (items || []).forEach((item: any) => {
+    const oid = item.outbound_id;
+    if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
+    itemsByOrderId[oid].push({
+      ...item,
+      materials: item.materials ? {
+        name: item.materials.name || '未知物资',
+        code: item.materials.code || '-',
+      } : null,
+    });
+  });
+
+  return orders.map((order: any) => ({
+    ...order,
+    outbound_items: itemsByOrderId[order.id] || [],
+  }));
 }
 
 /**
@@ -1106,7 +1185,7 @@ export async function getStocktakingOrders(params?: any) {
   const pg = getPaginationParams(params);
   let query = getSupabase()
     .from('stocktaking')
-    .select('*, stocktaking_items(*)');
+    .select('*');
 
   if (params?.status) {
     query = query.eq('status', params.status);
@@ -1118,12 +1197,37 @@ export async function getStocktakingOrders(params?: any) {
     query = query.range(pg.start, pg.end);
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data: orders, error } = await query.order('created_at', { ascending: false });
   if (error) {
     console.error('[getStocktakingOrders] 查询失败:', error.message);
     throw error;
   }
-  return data || [];
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = orders.map((o: any) => o.id);
+
+  // 单独查询盘点明细
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('stocktaking_items')
+    .select('*')
+    .in('stocktaking_id', orderIds);
+
+  if (itemsError) {
+    console.error('[getStocktakingOrders] 查询明细失败:', itemsError.message);
+  }
+
+  const itemsByOrderId: Record<number, any[]> = {};
+  (items || []).forEach((item: any) => {
+    const oid = item.stocktaking_id;
+    if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
+    itemsByOrderId[oid].push(item);
+  });
+
+  return orders.map((order: any) => ({
+    ...order,
+    stocktaking_items: itemsByOrderId[order.id] || [],
+  }));
 }
 
 export async function createStocktakingOrder(order: Omit<StocktakingOrder, 'id' | 'order_no' | 'created_at' | 'updated_at' | 'status' | 'items'> & { status?: string; items?: any[] }) {
