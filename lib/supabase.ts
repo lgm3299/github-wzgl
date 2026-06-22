@@ -762,11 +762,33 @@ export async function getOutboundOrders(params?: any) {
 
   const orderIds = orders.map((o: any) => o.id);
 
-  // 单独查询出库明细和关联物资
+  // 单独查询出库明细
   const { data: items, error: itemsError } = await getSupabase()
     .from('outbound_items')
-    .select('*, materials(name, code)')
+    .select('*')
     .in('outbound_id', orderIds);
+
+  // 获取所有不重复的material_id
+  const materialIds = [...new Set((items || []).map((item: any) => item.material_id).filter(Boolean))];
+  
+  // 单独查询物资信息
+  const { data: materialsData, error: matError } = await getSupabase()
+    .from('materials')
+    .select('id, name, code')
+    .in('id', materialIds);
+  
+  if (matError) {
+    console.error('[getOutboundOrders] 查询物资失败:', matError.message);
+  }
+
+  // 建立物资信息映射
+  const materialMap: Record<number, any> = {};
+  (materialsData || []).forEach((mat: any) => {
+    materialMap[mat.id] = {
+      name: mat.name || '未知物资',
+      code: mat.code || '-',
+    };
+  });
 
   if (itemsError) {
     console.error('[getOutboundOrders] 查询明细失败:', itemsError.message);
@@ -778,10 +800,7 @@ export async function getOutboundOrders(params?: any) {
     if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
     itemsByOrderId[oid].push({
       ...item,
-      materials: item.materials ? {
-        name: item.materials.name || '未知物资',
-        code: item.materials.code || '-',
-      } : null,
+      materials: item.material_id ? materialMap[item.material_id] || null : null,
     });
   });
 
