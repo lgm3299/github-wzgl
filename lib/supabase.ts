@@ -458,15 +458,33 @@ export async function getInboundOrders(params?: any) {
 
   const orderIds = orders.map((o: any) => o.id);
 
-  // 单独查询入库明细和关联物资
+  // 单独查询入库明细
   const { data: items, error: itemsError } = await getSupabase()
     .from('inbound_items')
-    .select('*, materials(name, code)')
+    .select('*')
     .in('inbound_id', orderIds);
 
-  if (itemsError) {
-    console.error('[getInboundOrders] 查询明细失败:', itemsError.message);
+  // 获取所有不重复的 material_id
+  const materialIds = [...new Set((items || []).map((item: any) => item.material_id).filter(Boolean))];
+
+  // 单独查询物资信息
+  const { data: materialsData, error: matError } = await getSupabase()
+    .from('materials')
+    .select('id, name, code')
+    .in('id', materialIds);
+
+  if (matError) {
+    console.error('[getInboundOrders] 查询物资失败:', matError.message);
   }
+
+  // 建立物资信息映射
+  const materialMap: Record<number, any> = {};
+  (materialsData || []).forEach((mat: any) => {
+    materialMap[mat.id] = {
+      name: mat.name || '未知物资',
+      code: mat.code || '-',
+    };
+  });
 
   // 单独查询供应商
   const supplierIds = [...new Set(orders.map((o: any) => o.supplier_id).filter(Boolean))];
@@ -490,10 +508,7 @@ export async function getInboundOrders(params?: any) {
     if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
     itemsByOrderId[oid].push({
       ...item,
-      materials: item.materials ? {
-        name: item.materials.name || '未知物资',
-        code: item.materials.code || '-',
-      } : null,
+      materials: item.material_id ? materialMap[item.material_id] || null : null,
     });
   });
 
@@ -602,10 +617,10 @@ export async function updateInboundOrderStatus(id: number, status: string) {
 export async function approveInboundOrder(id: number) {
   requireValue(id, 'id');
 
-  // 1. 获取入库单明细
+  // 1. 获取入库单（不含明细，避免关联查询被RLS阻止）
   const { data: order, error: orderError } = await getSupabase()
     .from('inbound')
-    .select('*, inbound_items(*)')
+    .select('*')
     .eq('id', id)
     .single();
 
@@ -615,6 +630,17 @@ export async function approveInboundOrder(id: number) {
   }
   if (!order) {
     throw new Error('入库单不存在');
+  }
+
+  // 1.5 单独查询入库明细
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('inbound_items')
+    .select('*')
+    .eq('inbound_id', id);
+
+  if (itemsError) {
+    console.error('[approveInboundOrder] 查询明细失败:', itemsError.message, { id });
+    throw itemsError;
   }
 
   // 2. 更新状态为已完成
@@ -629,13 +655,13 @@ export async function approveInboundOrder(id: number) {
   }
 
   // 3. 串行更新库存（避免并行竞态导致数据不一致）
-  const items = (order as any).inbound_items || [];
+  const inboundItems = (items || []) as any[];
 
-  if (items.length === 0) {
-    return order;
+  if (inboundItems.length === 0) {
+    return { ...order, inbound_items: [] };
   }
 
-  for (const item of items) {
+  for (const item of inboundItems) {
     if (!item.material_id || !item.quantity) {
       console.warn('[approveInboundOrder] 跳过无效明细:', item);
       continue;
@@ -908,10 +934,10 @@ export async function updateOutboundOrderStatus(id: number, status: string) {
 export async function approveOutboundOrder(id: number) {
   requireValue(id, 'id');
 
-  // 1. 获取出库单明细
+  // 1. 获取出库单（不含明细，避免关联查询被RLS阻止）
   const { data: order, error: orderError } = await getSupabase()
     .from('outbound')
-    .select('*, outbound_items(*)')
+    .select('*')
     .eq('id', id)
     .single();
 
@@ -921,6 +947,17 @@ export async function approveOutboundOrder(id: number) {
   }
   if (!order) {
     throw new Error('出库单不存在');
+  }
+
+  // 1.5 单独查询出库明细
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('outbound_items')
+    .select('*')
+    .eq('outbound_id', id);
+
+  if (itemsError) {
+    console.error('[approveOutboundOrder] 查询明细失败:', itemsError.message, { id });
+    throw itemsError;
   }
 
   // 2. 更新状态为已完成
@@ -935,13 +972,13 @@ export async function approveOutboundOrder(id: number) {
   }
 
   // 3. 串行扣减库存（避免并行竞态）
-  const items = (order as any).outbound_items || [];
+  const outboundItems = (items || []) as any[];
 
-  if (items.length === 0) {
-    return order;
+  if (outboundItems.length === 0) {
+    return { ...order, outbound_items: [] };
   }
 
-  for (const item of items) {
+  for (const item of outboundItems) {
     if (!item.material_id || !item.quantity) {
       console.warn('[approveOutboundOrder] 跳过无效明细:', item);
       continue;
