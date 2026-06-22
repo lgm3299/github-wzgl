@@ -63,15 +63,20 @@ const InventoryPage: React.FC = () => {
 
   // 导出库存数据
   const handleExport = () => {
-    const exportData = data.map(item => ({
-      code: item.material?.code || '',
-      name: item.material?.name || '',
-      category: item.material?.categories?.name || '',
-      quantity: item.quantity,
-      updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
-    }));
-    downloadCSV(exportData, EXPORT_COLUMNS, '库存数据');
-    message.success('导出成功');
+    try {
+      const exportData = data.map(item => ({
+        code: item.material?.code || '',
+        name: item.material?.name || '',
+        category: item.material?.categories?.name || '',
+        quantity: item.quantity,
+        updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
+      }));
+      downloadCSV(exportData, EXPORT_COLUMNS, '库存数据');
+      message.success('导出成功');
+    } catch (error: any) {
+      console.error('导出失败:', error);
+      message.error('导出失败: ' + (error.message || '未知错误'));
+    }
   };
 
   const columns = [

@@ -992,8 +992,10 @@ export async function getInventories(params?: any) {
 
   // 获取所有不重复的 material_id
   const materialIds = [...new Set(inventoryData.map((item: any) => item.material_id).filter(Boolean))];
+  console.log('[getInventories] inventoryData count:', inventoryData.length, 'materialIds:', materialIds);
 
   if (materialIds.length === 0) {
+    console.warn('[getInventories] 所有 inventory 记录的 material_id 为空');
     return inventoryData.map((item: any) => ({ ...item, material: null }));
   }
 
@@ -1003,8 +1005,15 @@ export async function getInventories(params?: any) {
     .select('id, code, name, categories(name)')
     .in('id', materialIds);
 
+  console.log('[getInventories] materialsData count:', materialsData?.length, 'matError:', matError?.message);
+
   if (matError) {
     console.error('[getInventories] 查询物资失败:', matError.message);
+    return inventoryData.map((item: any) => ({ ...item, material: null }));
+  }
+
+  if (!materialsData || materialsData.length === 0) {
+    console.warn('[getInventories] materials 表未返回任何数据');
     return inventoryData.map((item: any) => ({ ...item, material: null }));
   }
 
@@ -1020,10 +1029,12 @@ export async function getInventories(params?: any) {
   });
 
   // 合并数据
-  return inventoryData.map((item: any) => ({
+  const result = inventoryData.map((item: any) => ({
     ...item,
     material: item.material_id ? materialMap[item.material_id] || null : null,
   }));
+  console.log('[getInventories] 合并结果样本:', result.slice(0, 3).map((r: any) => ({ id: r.id, material_id: r.material_id, material_name: r.material?.name })));
+  return result;
 }
 
 export async function deleteInventory(id: number) {
