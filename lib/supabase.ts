@@ -975,28 +975,54 @@ export interface Inventory {
 }
 
 export async function getInventories(params?: any) {
+  // 先查询库存数据
   let query = getSupabase()
     .from('inventory')
-    .select('*, materials(*, categories(name))');
+    .select('*');
 
   query = applyDateRange(query, 'updated_at', params?.startDate, params?.endDate);
 
-  const { data, error } = await query.order('updated_at', { ascending: false });
+  const { data: inventoryData, error } = await query.order('updated_at', { ascending: false });
   if (error) {
     console.error('[getInventories] 查询失败:', error.message);
     throw error;
   }
 
-  if (!data || data.length === 0) return [];
+  if (!inventoryData || inventoryData.length === 0) return [];
 
-  return data.map((item: any) => ({
+  // 获取所有不重复的 material_id
+  const materialIds = [...new Set(inventoryData.map((item: any) => item.material_id).filter(Boolean))];
+
+  if (materialIds.length === 0) {
+    return inventoryData.map((item: any) => ({ ...item, material: null }));
+  }
+
+  // 单独查询物资数据（含分类）
+  const { data: materialsData, error: matError } = await getSupabase()
+    .from('materials')
+    .select('id, code, name, categories(name)')
+    .in('id', materialIds);
+
+  if (matError) {
+    console.error('[getInventories] 查询物资失败:', matError.message);
+    return inventoryData.map((item: any) => ({ ...item, material: null }));
+  }
+
+  // 建立 id -> material 的映射
+  const materialMap: Record<number, any> = {};
+  (materialsData || []).forEach((mat: any) => {
+    materialMap[mat.id] = {
+      id: mat.id,
+      code: mat.code || '-',
+      name: mat.name || '未知物资',
+      categories: mat.categories ? { name: mat.categories.name } : null,
+    };
+  });
+
+  // 合并数据
+  return inventoryData.map((item: any) => ({
     ...item,
-    material: item.materials ? {
-      id: item.materials.id,
-      name: item.materials.name || '未知物资',
-      code: item.materials.code || '-',
-      categories: item.materials.categories ? { name: item.materials.categories.name } : null,
-    } : null,
+    material: item.material_id ? materialMap[item.material_id] || null : null,
   }));
 }
 
