@@ -95,7 +95,7 @@ const InboundPage: React.FC = () => {
 
   const handleAdd = () => {
     form.resetFields();
-    setItems([{ material_id: '', quantity: 1, unit_price: 0, total_amount: 0 }]);
+    setItems([{ material_id: '', quantity: 1 }]);
     if (currentUser?.full_name) {
       form.setFieldsValue({ operator: currentUser.full_name });
     }
@@ -103,7 +103,7 @@ const InboundPage: React.FC = () => {
   };
 
   const handleAddItem = () => {
-    setItems([...items, { material_id: '', quantity: 1, unit_price: 0, total_amount: 0 }]);
+    setItems([...items, { material_id: '', quantity: 1 }]);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -113,11 +113,6 @@ const InboundPage: React.FC = () => {
   const handleItemChange = (index: number, field: string, value: any) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
-    if (field === 'quantity' || field === 'unit_price') {
-      const qty = Number(newItems[index].quantity) || 0;
-      const price = Number(newItems[index].unit_price) || 0;
-      newItems[index].total_amount = qty * price;
-    }
     setItems(newItems);
   };
 
@@ -226,8 +221,6 @@ const InboundPage: React.FC = () => {
         items: validItems.map(item => ({
           material_id: item.material_id,
           quantity: item.quantity,
-          unit_price: item.unit_price || 0,
-          total_amount: item.total_amount || 0,
         })),
       });
       message.success('创建成功');
@@ -254,8 +247,6 @@ const InboundPage: React.FC = () => {
           material_code: '',
           unit: '',
           quantity: '',
-          unit_price: '',
-          total_amount: '',
           remark: order.remark || '',
           created_at: new Date(order.created_at).toLocaleString(),
         });
@@ -270,8 +261,6 @@ const InboundPage: React.FC = () => {
             material_code: item.materials?.code || '',
             unit: item.materials?.unit || '',
             quantity: item.quantity,
-            unit_price: item.unit_price || 0,
-            total_amount: item.total_amount || 0,
             remark: order.remark || '',
             created_at: new Date(order.created_at).toLocaleString(),
           });
@@ -287,8 +276,6 @@ const InboundPage: React.FC = () => {
       { key: 'material_code', label: '物资编码' },
       { key: 'unit', label: '单位' },
       { key: 'quantity', label: '数量' },
-      { key: 'unit_price', label: '单价(元)' },
-      { key: 'total_amount', label: '总金额(元)' },
       { key: 'remark', label: '备注' },
       { key: 'created_at', label: '创建时间' },
     ];
@@ -302,7 +289,6 @@ const InboundPage: React.FC = () => {
       { key: 'material_name', label: '物资名称' },
       { key: 'quantity', label: '数量' },
       { key: 'unit', label: '单位' },
-      { key: 'unit_price', label: '单价(元)' },
       { key: 'supplier_name', label: '供应商' },
       { key: 'remark', label: '备注' },
     ], '入库记录导入模板');
@@ -327,7 +313,6 @@ const InboundPage: React.FC = () => {
         { key: 'material_name', label: '物资名称' },
         { key: 'quantity', label: '数量' },
         { key: 'unit', label: '单位' },
-        { key: 'unit_price', label: '单价(元)' },
         { key: 'supplier_name', label: '供应商' },
         { key: 'remark', label: '备注' },
       ]);
@@ -374,15 +359,12 @@ const InboundPage: React.FC = () => {
               throw new Error(`物资"${materialName}"(${materialCode})未找到，请先在物资档案中创建`);
             }
             const qty = Number(item.quantity) || 0;
-            const price = Number(item.unit_price) || 0;
             if (qty <= 0) {
               throw new Error(`物资"${material.name}"的数量必须大于0`);
             }
             orderItems.push({
               material_id: material.id,
               quantity: qty,
-              unit_price: price,
-              total_amount: qty * price,
             });
           }
 
@@ -454,17 +436,6 @@ const InboundPage: React.FC = () => {
       },
     },
     {
-      title: '总金额(元)',
-      key: 'total',
-      width: 100,
-      render: (_: any, record: any) => {
-        const total = (record.inbound_items || []).reduce(
-          (sum: number, item: any) => sum + (Number(item.total_amount) || 0), 0
-        );
-        return total > 0 ? <span style={{ color: '#1677ff', fontWeight: 500 }}>¥{total.toFixed(2)}</span> : '-';
-      },
-    },
-    {
       title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (s: string) => {
         const st = statusMap[s] || { color: 'default', text: s };
@@ -521,16 +492,7 @@ const InboundPage: React.FC = () => {
         },
       },
       {
-        title: '单价(元)', dataIndex: 'unit_price', key: 'unit_price', width: 100,
-        render: (v: number) => v != null && v > 0 ? `¥${Number(v).toFixed(2)}` : '-',
-      },
-      {
-        title: '总金额(元)', dataIndex: 'total_amount', key: 'total_amount', width: 110,
-        render: (v: number) => v != null && v > 0
-          ? <span style={{ color: '#1677ff', fontWeight: 500 }}>¥{Number(v).toFixed(2)}</span>
-          : '-',
-      },
-      { title: '备注', dataIndex: 'remark', key: 'remark', render: (v: any) => v || '-' },
+        title: '备注', dataIndex: 'remark', key: 'remark', render: (v: any) => v || '-' },
     ];
     return (
       <Table
@@ -542,16 +504,11 @@ const InboundPage: React.FC = () => {
         style={{ background: '#fafafa' }}
         summary={() => {
           const totalQty = items.reduce((s: number, i: any) => s + (Number(i.quantity) || 0), 0);
-          const totalAmt = items.reduce((s: number, i: any) => s + (Number(i.total_amount) || 0), 0);
           return (
             <Table.Summary.Row>
               <Table.Summary.Cell index={0} colSpan={3}><strong>合计</strong></Table.Summary.Cell>
               <Table.Summary.Cell index={1}><strong>{totalQty}</strong></Table.Summary.Cell>
               <Table.Summary.Cell index={2} />
-              <Table.Summary.Cell index={3}>
-                <strong style={{ color: '#1677ff' }}>¥{totalAmt.toFixed(2)}</strong>
-              </Table.Summary.Cell>
-              <Table.Summary.Cell index={4} />
             </Table.Summary.Row>
           );
         }}
@@ -659,8 +616,6 @@ const InboundPage: React.FC = () => {
           <div style={{ display: 'flex', gap: 8, marginBottom: 4, padding: '0 38px 0 30px', color: '#666', fontSize: 12 }}>
             <span style={{ flex: 2 }}>物资名称（编码/库存）</span>
             <span style={{ width: 110 }}>数量</span>
-            <span style={{ width: 120 }}>单价(元)</span>
-            <span style={{ width: 120 }}>总金额(元)</span>
             <span style={{ width: 32 }}></span>
           </div>
 
@@ -697,26 +652,6 @@ const InboundPage: React.FC = () => {
                       addonAfter={unit}
                     />
                   </div>
-                  <div style={{ width: 120 }}>
-                    <InputNumber
-                      placeholder="单价"
-                      value={item.unit_price}
-                      onChange={(value) => handleItemChange(index, 'unit_price', value)}
-                      min={0}
-                      precision={2}
-                      style={{ width: '100%' }}
-                      addonAfter="元"
-                    />
-                  </div>
-                  <div style={{ width: 120 }}>
-                    <InputNumber
-                      value={item.total_amount}
-                      disabled
-                      precision={2}
-                      style={{ width: '100%' }}
-                      addonAfter="元"
-                    />
-                  </div>
                   <Button
                     type="link" danger icon={<MinusCircleOutlined />}
                     onClick={() => handleRemoveItem(index)}
@@ -730,14 +665,6 @@ const InboundPage: React.FC = () => {
             {items.length === 0 && (
               <div style={{ padding: '24px 0', textAlign: 'center', color: '#999', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
                 暂无物资明细，请点击"添加物资"按钮
-              </div>
-            )}
-
-            {items.some(item => item.quantity > 0) && (
-              <div style={{ marginTop: 8, textAlign: 'right', padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
-                <span style={{ fontWeight: 500 }}>
-                  合计：¥{items.reduce((sum, item) => sum + (Number(item.total_amount) || 0), 0).toFixed(2)}
-                </span>
               </div>
             )}
           </div>

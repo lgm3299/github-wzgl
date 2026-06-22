@@ -26,6 +26,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   BookOutlined,
+  RestOutlined,
 } from '@ant-design/icons';
 import { signOut, getCurrentUser, User } from '@/lib/supabase';
 
@@ -41,6 +42,7 @@ const MENU_ITEMS = [
   { key: '/outbound', icon: <ExportOutlined />, label: '出库管理' },
   { key: '/inventory', icon: <DatabaseOutlined />, label: '库存管理' },
   { key: '/stocktaking', icon: <CheckCircleOutlined />, label: '盘点管理' },
+  { key: '/recycle', icon: <RestOutlined />, label: '废旧回收' },
   { key: '/reports', icon: <BarChartOutlined />, label: '报表统计' },
   { key: '/admin', icon: <SettingOutlined />, label: '后台管理' },
   { key: '/guide', icon: <BookOutlined />, label: '使用指南' },

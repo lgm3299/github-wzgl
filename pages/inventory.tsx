@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Typography, Button, Space, message, DatePicker, Select } from 'antd';
+import { Table, Tag, Typography, Button, Space, message, DatePicker, Select, Alert } from 'antd';
 import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { getInventories, getCategories } from '@/lib/supabase';
 import { downloadCSV } from '@/lib/importExport';
@@ -103,7 +103,17 @@ const InventoryPage: React.FC = () => {
       dataIndex: 'quantity',
       key: 'quantity',
       width: 100,
-      render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>,
+      render: (v: number, record: any) => {
+        const minStock = record.material?.min_stock ?? 10;
+        const isLow = v < minStock;
+        return <Tag color={isLow ? 'red' : v > 0 ? 'green' : 'default'}>{v}{isLow ? ' (预警)' : ''}</Tag>;
+      },
+    },
+    {
+      title: '预警线',
+      key: 'min_stock',
+      width: 80,
+      render: (_: any, record: any) => record.material?.min_stock ?? 10,
     },
     {
       title: '更新时间',
@@ -161,6 +171,25 @@ const InventoryPage: React.FC = () => {
         />
         <Button onClick={handleReset}>重置</Button>
       </div>
+
+      {/* 低库存预警统计 */}
+      {(() => {
+        const lowStockItems = data.filter((item: any) => {
+          const minStock = item.material?.min_stock ?? 10;
+          return item.quantity < minStock;
+        });
+        if (lowStockItems.length > 0) {
+          return (
+            <Alert
+              message={`库存预警：有 ${lowStockItems.length} 种物资库存低于预警线（${lowStockItems.slice(0, 3).map((i: any) => i.material?.name).join('、')}${lowStockItems.length > 3 ? ' 等' : ''}），请及时补充`}
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          );
+        }
+        return null;
+      })()}
 
       <Table
         rowKey="id"

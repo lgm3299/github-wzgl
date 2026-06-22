@@ -12,8 +12,6 @@ const EXPORT_COLUMNS = [
   { key: 'name', label: '物资名称' },
   { key: 'specification', label: '规格型号' },
   { key: 'unit', label: '单位' },
-  { key: 'price', label: '参考单价' },
-  { key: 'location', label: '存放位置' },
 ];
 
 // 导入列定义常量（同时用于校验导入字段）
@@ -22,8 +20,6 @@ const IMPORT_COLUMNS = [
   { key: 'name', label: '物资名称' },
   { key: 'specification', label: '规格型号' },
   { key: 'unit', label: '单位' },
-  { key: 'price', label: '参考单价' },
-  { key: 'location', label: '存放位置' },
 ];
 
 // 允许导入的字段白名单（防止 CSV 注入额外字段）
@@ -291,7 +287,6 @@ const MaterialsPage: React.FC = () => {
     { title: '物资名称', dataIndex: 'name', key: 'name', width: 150 },
     { title: '规格型号', dataIndex: 'specification', key: 'specification', width: 120 },
     { title: '单位', dataIndex: 'unit', key: 'unit', width: 60 },
-    { title: '参考单价', dataIndex: 'price', key: 'price', width: 100, render: (v: number) => v ? `¥${Number(v).toFixed(2)}` : '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (s: number) => <Tag color={s === 1 ? 'green' : 'red'}>{s === 1 ? '启用' : '禁用'}</Tag> },
     { title: '操作', key: 'action', width: 160, fixed: 'right' as const, render: (_: any, record: any) => (
       <Space>
@@ -394,12 +389,6 @@ const MaterialsPage: React.FC = () => {
               <Select.Option value={1}>启用</Select.Option>
               <Select.Option value={0}>禁用</Select.Option>
             </Select>
-          </Form.Item>
-          <Form.Item name="price" label="参考单价">
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" />
-          </Form.Item>
-          <Form.Item name="location" label="存放位置">
-            <Input placeholder="请输入存放位置" />
           </Form.Item>
         </Form>
       </Modal>

@@ -294,7 +294,6 @@ const OutboundPage: React.FC = () => {
         />
       ),
     },
-    { title: '参考单价', dataIndex: 'price', key: 'price', width: 100, render: (v: number) => v ? `¥${Number(v).toFixed(2)}` : '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (s: number) => <Tag color={s === 1 ? 'green' : 'red'}>{s === 1 ? '启用' : '禁用'}</Tag> },
   ], [selectedRows]);
 

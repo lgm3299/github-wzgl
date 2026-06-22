@@ -1181,6 +1181,32 @@ export interface StocktakingItem {
   remark?: string;
 }
 
+export interface RecycleOrder {
+  id: number;
+  order_no: string;
+  operator: string;
+  recycler: string;
+  recycle_date: string;
+  status: string;
+  remark?: string;
+  created_at: string;
+  updated_at: string;
+  items?: RecycleItem[];
+}
+
+export interface RecycleItem {
+  id: number;
+  recycle_id: number;
+  material_id: number;
+  quantity: number;
+  remark?: string;
+  materials?: {
+    name: string;
+    code: string;
+    unit: string;
+  };
+}
+
 export async function getStocktakingOrders(params?: any) {
   const pg = getPaginationParams(params);
   let query = getSupabase()
@@ -1477,6 +1503,225 @@ export async function deleteStocktakingOrder(id: number) {
 
   if (error) {
     console.error('[deleteStocktakingOrder] 删除盘点单失败:', error.message, { id });
+    throw error;
+  }
+}
+
+// ============================================
+// 回收相关函数
+// ============================================
+
+export async function getRecycleOrders(params?: any) {
+  const pg = getPaginationParams(params);
+  let query = getSupabase()
+    .from('recycle')
+    .select('*');
+
+  if (params?.status) {
+    query = query.eq('status', params.status);
+  }
+
+  query = applyDateRange(query, 'created_at', params?.startDate, params?.endDate);
+
+  if (pg) {
+    query = query.range(pg.start, pg.end);
+  }
+
+  const { data: orders, error } = await query.order('created_at', { ascending: false });
+  if (error) {
+    console.error('[getRecycleOrders] 查询失败:', error.message);
+    throw error;
+  }
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = orders.map((o: any) => o.id);
+
+  const { data: items, error: itemsError } = await getSupabase()
+    .from('recycle_items')
+    .select('*, materials(name, code, unit)')
+    .in('recycle_id', orderIds);
+
+  if (itemsError) {
+    console.error('[getRecycleOrders] 查询明细失败:', itemsError.message);
+  }
+
+  const itemsByOrderId: Record<number, any[]> = {};
+  (items || []).forEach((item: any) => {
+    const oid = item.recycle_id;
+    if (!itemsByOrderId[oid]) itemsByOrderId[oid] = [];
+    itemsByOrderId[oid].push({
+      ...item,
+      materials: item.materials ? {
+        name: item.materials.name || '未知物资',
+        code: item.materials.code || '-',
+        unit: item.materials.unit || '个',
+      } : null,
+    });
+  });
+
+  return orders.map((order: any) => ({
+    ...order,
+    recycle_items: itemsByOrderId[order.id] || [],
+  }));
+}
+
+export async function createRecycleOrder(order: Omit<RecycleOrder, 'id' | 'order_no' | 'created_at' | 'updated_at'> & { items?: any[] }) {
+  requireValue(order.operator, 'operator');
+  requireValue(order.recycler, 'recycler');
+  const orderNo = generateOrderNo('HS');
+
+  const { data: orderData, error: orderError } = await getSupabase()
+    .from('recycle')
+    .insert([{
+      order_no: orderNo,
+      operator: order.operator,
+      recycler: order.recycler,
+      recycle_date: order.recycle_date || new Date().toISOString().split('T')[0],
+      status: order.status || 'pending',
+      remark: order.remark,
+    }])
+    .select()
+    .single();
+
+  if (orderError) {
+    console.error('[createRecycleOrder] 创建回收单失败:', orderError.message);
+    throw orderError;
+  }
+
+  // 插入明细
+  if (order.items && order.items.length > 0) {
+    const { error: itemsError } = await getSupabase()
+      .from('recycle_items')
+      .insert(order.items.map((item: any) => ({
+        recycle_id: orderData.id,
+        material_id: item.material_id,
+        quantity: item.quantity,
+        remark: item.remark,
+      })));
+
+    if (itemsError) {
+      console.error('[createRecycleOrder] 插入明细失败:', itemsError.message);
+      // 补偿删除主单
+      await getSupabase().from('recycle').delete().eq('id', orderData.id);
+      throw itemsError;
+    }
+  }
+
+  return orderData;
+}
+
+export async function updateRecycleOrderStatus(id: number, status: string) {
+  requireValue(id, 'id');
+  const { data, error } = await getSupabase()
+    .from('recycle')
+    .update({ status })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    console.error('[updateRecycleOrderStatus] 更新失败:', error.message, { id, status });
+    throw error;
+  }
+  return data;
+}
+
+export async function deleteRecycleOrder(id: number) {
+  requireValue(id, 'id');
+  const { error } = await getSupabase()
+    .from('recycle')
+    .delete()
+    .eq('id', id);
+  if (error) {
+    console.error('[deleteRecycleOrder] 删除失败:', error.message, { id });
+    throw error;
+  }
+}
+
+// ============================================
+// 用量统计函数
+// ============================================
+
+export async function getOutboundUsageStats(startDate?: string, endDate?: string) {
+  try {
+    // 先查询时间范围内的出库单ID
+    let ordersQuery = getSupabase()
+      .from('outbound')
+      .select('id, created_at');
+
+    if (startDate) {
+      ordersQuery = ordersQuery.gte('created_at', startDate + 'T00:00:00');
+    }
+    if (endDate) {
+      ordersQuery = ordersQuery.lte('created_at', endDate + 'T23:59:59');
+    }
+
+    const { data: orders, error: ordersError } = await ordersQuery;
+    if (ordersError) {
+      console.error('[getOutboundUsageStats] 查询出库单失败:', ordersError.message);
+      throw ordersError;
+    }
+
+    if (!orders || orders.length === 0) {
+      return [];
+    }
+
+    const orderIds = orders.map((o: any) => o.id);
+
+    // 查询出库明细
+    const { data: items, error: itemsError } = await getSupabase()
+      .from('outbound_items')
+      .select('material_id, quantity')
+      .in('outbound_id', orderIds);
+
+    if (itemsError) {
+      console.error('[getOutboundUsageStats] 查询明细失败:', itemsError.message);
+      throw itemsError;
+    }
+
+    if (!items || items.length === 0) {
+      return [];
+    }
+
+    // 查询物资信息
+    const materialIds = [...new Set(items.map((item: any) => item.material_id).filter(Boolean))];
+    const { data: materialsData, error: matError } = await getSupabase()
+      .from('materials')
+      .select('id, name, code, unit')
+      .in('id', materialIds);
+
+    if (matError) {
+      console.error('[getOutboundUsageStats] 查询物资失败:', matError.message);
+    }
+
+    const materialMap: Record<number, any> = {};
+    (materialsData || []).forEach((mat: any) => {
+      materialMap[mat.id] = mat;
+    });
+
+    // 按物资分组统计
+    const stats: Record<number, { material_id: number; name: string; code: string; unit: string; total_quantity: number }> = {};
+
+    items.forEach((item: any) => {
+      const mid = item.material_id;
+      if (!mid) return;
+      if (!stats[mid]) {
+        const mat = materialMap[mid];
+        stats[mid] = {
+          material_id: mid,
+          name: mat?.name || '未知物资',
+          code: mat?.code || '-',
+          unit: mat?.unit || '个',
+          total_quantity: 0,
+        };
+      }
+      stats[mid].total_quantity += Number(item.quantity) || 0;
+    });
+
+    // 按消耗量降序排序
+    return Object.values(stats).sort((a, b) => b.total_quantity - a.total_quantity);
+  } catch (error: any) {
+    console.error('[getOutboundUsageStats] 统计失败:', error.message);
     throw error;
   }
 }

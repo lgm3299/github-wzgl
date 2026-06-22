@@ -159,6 +159,33 @@ create table if not exists user_profiles (
 comment on table user_profiles is '用户扩展信息';
 
 -- ============================================
+-- 9. 废旧物资回收表
+-- ============================================
+create table if not exists recycle (
+  id bigint primary key generated always as identity,
+  order_no text not null unique,
+  operator text not null,
+  recycler text not null,
+  recycle_date date not null default current_date,
+  status text default 'pending',
+  remark text,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+comment on table recycle is '废旧物资回收记录';
+
+create table if not exists recycle_items (
+  id bigint primary key generated always as identity,
+  recycle_id bigint references recycle(id) on delete cascade,
+  material_id bigint references materials(id),
+  quantity integer not null,
+  remark text
+);
+
+comment on table recycle_items is '回收明细';
+
+-- ============================================
 -- 插入测试数据
 -- ============================================
 insert into categories (name, description) values
@@ -196,6 +223,8 @@ alter table outbound_items enable row level security;
 alter table inventory enable row level security;
 alter table stocktaking enable row level security;
 alter table stocktaking_items enable row level security;
+alter table recycle enable row level security;
+alter table recycle_items enable row level security;
 alter table user_profiles enable row level security;
 
 -- ============================================
@@ -293,10 +322,23 @@ create policy "用户可以查看自己的资料"
   using (is_admin() or id = auth.uid());
 
 -- ============================================
+-- 回收策略
+drop policy if exists "所有人可以查看回收记录" on public.recycle;
+create policy "所有人可以查看回收记录"
+  on public.recycle for select to anon, authenticated
+  using (true);
+
+drop policy if exists "管理员和经理可以管理回收记录" on public.recycle;
+create policy "管理员和经理可以管理回收记录"
+  on public.recycle for all to authenticated
+  using (is_admin_or_manager());
+
+-- ============================================
 -- 创建索引
 -- ============================================
 create index if not exists idx_materials_category on materials(category_id);
 create index if not exists idx_materials_name on materials(name);
+create index if not exists idx_recycle_date on recycle(recycle_date);
 create index if not exists idx_inbound_created on inbound(created_at desc);
 create index if not exists idx_outbound_created on outbound(created_at desc);
 

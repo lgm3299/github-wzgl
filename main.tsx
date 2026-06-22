@@ -15,6 +15,7 @@ const InboundPage = lazy(() => import('./pages/inbound'));
 const OutboundPage = lazy(() => import('./pages/outbound'));
 const InventoryPage = lazy(() => import('./pages/inventory'));
 const StocktakingPage = lazy(() => import('./pages/stocktaking'));
+const RecyclePage = lazy(() => import('./pages/recycle'));
 const ReportsPage = lazy(() => import('./pages/reports'));
 const AdminPage = lazy(() => import('./pages/admin'));
 const GuidePage = lazy(() => import('./pages/guide'));
@@ -197,6 +198,7 @@ const App: React.FC = () => {
                 <Route path="outbound" element={<OutboundPage />} />
                 <Route path="inventory" element={<InventoryPage />} />
                 <Route path="stocktaking" element={<StocktakingPage />} />
+                <Route path="recycle" element={<RecyclePage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="admin" element={<AdminPage />} />
                 <Route path="guide" element={<GuidePage />} />
