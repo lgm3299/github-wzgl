@@ -283,7 +283,7 @@ const OutboundPage: React.FC = () => {
       { key: 'unit', label: '单位' },
       { key: 'current_quantity', label: '当前库存' },
     ];
-    printMaterials(printData, columns, '出库管理');
+    printMaterials(printData, columns);
   };
 
   const columns = useMemo(() => [

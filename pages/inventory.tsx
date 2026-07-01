@@ -104,7 +104,7 @@ const InventoryPage: React.FC = () => {
       { key: 'quantity', label: '当前库存' },
       { key: 'updated_at', label: '更新时间' },
     ];
-    printMaterials(printData, columns, '库存管理');
+    printMaterials(printData, columns);
   };
 
   const columns = [

@@ -79,7 +79,7 @@ const ReportsPage: React.FC = () => {
       { key: 'unit', label: '单位' },
       { key: 'total_quantity', label: '消耗数量' },
     ];
-    printMaterials(printData, columns, '物资用量统计');
+    printMaterials(printData, columns);
   };
 
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '200px auto' }} />;

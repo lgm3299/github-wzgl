@@ -333,7 +333,7 @@ const InboundPage: React.FC = () => {
       { key: 'remark', label: '备注' },
       { key: 'created_at', label: '创建时间' },
     ];
-    printMaterials(printData, columns, '入库记录');
+    printMaterials(printData, columns);
   };
 
   const handleDownloadTemplate = () => {

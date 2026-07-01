@@ -303,7 +303,7 @@ const StocktakingPage: React.FC = () => {
       { key: 'status_text', label: '状态' },
       { key: 'created_at', label: '创建时间' },
     ];
-    printMaterials(printData, columns, '盘点记录');
+    printMaterials(printData, columns);
   };
 
   // 表格列定义

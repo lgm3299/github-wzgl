@@ -81,7 +81,7 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
  * 表头「两江校区后勤物资表」（无边框）、打印时间（另起一行）、签字栏
  * @page margin 0 完全去掉浏览器页眉页脚；数据每页 35 行，每页均有完整表头和签名栏
  */
-export function printMaterials(data: any[]): void {
+export function printMaterials(data: any[], columns: CsvColumn[] = []): void {
   if (!data || data.length === 0) {
     message?.warning('暂无数据可打印');
     return;
@@ -100,17 +100,20 @@ export function printMaterials(data: any[]): void {
     + String(NOW.getHours()).padStart(2, '0') + ':'
     + String(NOW.getMinutes()).padStart(2, '0');
 
+  // 默认列：物资档案的5列
+  const cols = columns.length > 0
+    ? columns.map(c => ({ label: c.label, key: c.key, width: 100 }))
+    : [
+        { label: '序号', key: '_idx', width: 50 },
+        { label: '物资编码', key: 'code', width: 100 },
+        { label: '物资名称', key: 'name', width: 200 },
+        { label: '规格型号', key: 'specification', width: 150 },
+        { label: '单位', key: 'unit', width: 50 },
+      ];
+  const TOTAL_WIDTH = cols.reduce((s, c) => s + c.width, 0);
+  const colSpan = cols.length;
   const ROWS_PER_PAGE = 35;
   const PAGE_COUNT = Math.ceil(data.length / ROWS_PER_PAGE);
-
-  const cols = [
-    { label: '序号', key: '_idx' },
-    { label: '物资编码', key: 'code' },
-    { label: '物资名称', key: 'name' },
-    { label: '规格型号', key: 'specification' },
-    { label: '单位', key: 'unit' },
-  ];
-  const TOTAL_WIDTH = 550;
 
   let pages: string[] = [];
 
@@ -130,12 +133,12 @@ export function printMaterials(data: any[]): void {
 
     pages.push(`<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; margin:0 auto; page-break-after:always;">
   <tr>
-    <td colspan="${cols.length}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:8px 0;">
+    <td colspan="${colSpan}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:8px 0;">
       两江校区后勤物资表
     </td>
   </tr>
   <tr>
-    <td colspan="${cols.length}" style="border:none;font-size:12px;text-align:right;padding:4px 8px;">
+    <td colspan="${colSpan}" style="border:none;font-size:12px;text-align:right;padding:4px 8px;">
       打印时间：${PRINT_TIME}
     </td>
   </tr>
@@ -143,9 +146,9 @@ export function printMaterials(data: any[]): void {
     ${cols.map(c => `<th style="border:1px solid #333;padding:5px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
   </tr>
   ${rowsHtml}
-  <tr><td colspan="${cols.length}" style="border:none;height:8px;"></td></tr>
+  <tr><td colspan="${colSpan}" style="border:none;height:8px;"></td></tr>
   <tr>
-    <td colspan="${cols.length}" style="border:1px solid #333;padding:4px 6px;">
+    <td colspan="${colSpan}" style="border:1px solid #333;padding:4px 6px;">
       <table style="width:100%;font-size:12px;border-collapse:collapse;">
         <tr>
           <td style="padding:4px 0;white-space:nowrap;width:33.33%;">经办人：________________</td>
@@ -211,14 +214,22 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
       + String(NOW.getHours()).padStart(2, '0') + ':'
       + String(NOW.getMinutes()).padStart(2, '0');
 
-    const cols = [
-      { label: '序号', key: '_idx', width: 50 },
-      { label: '物资编码', key: 'code', width: 100 },
-      { label: '物资名称', key: 'name', width: 200 },
-      { label: '规格型号', key: 'specification', width: 150 },
-      { label: '单位', key: 'unit', width: 50 },
-    ];
-    const TOTAL_WIDTH = cols.reduce((s, c) => s + c.width, 0); // 550
+    // 动态列配置：根据传入的 columns 自动适配
+    const cols = columns.map(c => {
+      // 智能估算宽度
+      let width = 80;
+      if (c.key === '_idx') width = 50;
+      else if (c.label === '序号') width = 50;
+      else if (c.label.includes('名称') || c.label.includes('编码')) width = 120;
+      else if (c.label.includes('时间') || c.label.includes('日期')) width = 140;
+      else if (c.label.includes('数量')) width = 80;
+      else if (c.label.includes('规格')) width = 120;
+      else if (c.label.includes('单位') || c.label.includes('状态')) width = 70;
+      return { ...c, width };
+    });
+
+    const TOTAL_WIDTH = cols.reduce((s, c) => s + c.width, 0);
+    const colSpan = cols.length;
 
     let rowsHtml = '';
     data.forEach((row: any, i: number) => {
@@ -229,8 +240,6 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
       });
       rowsHtml += `</tr>`;
     });
-
-    const colSpan = cols.length;
 
     const htmlContent = `
 <table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; font-family:'SimSun',宋体,serif; margin:0 auto;">

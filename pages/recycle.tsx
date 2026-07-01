@@ -244,7 +244,7 @@ const RecyclePage: React.FC = () => {
       { key: 'remark', label: '备注' },
       { key: 'created_at', label: '创建时间' },
     ];
-    printMaterials(printData, columns, '废旧物资回收记录');
+    printMaterials(printData, columns);
   };
 
   const statusMap = RECYCLE_STATUS_MAP;
