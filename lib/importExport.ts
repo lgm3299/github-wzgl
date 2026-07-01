@@ -128,9 +128,7 @@ export function printMaterials(data: any[]): void {
   </tr>`;
     }).join('');
 
-    pages.push(`
-<div style="page-break-after:always; margin-bottom:0;">
-<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; margin:0 auto;">
+    pages.push(`<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; margin:0 auto; page-break-after:always;">
   <tr>
     <td colspan="${cols.length}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:8px 0;">
       两江校区后勤物资表
@@ -157,8 +155,7 @@ export function printMaterials(data: any[]): void {
       </table>
     </td>
   </tr>
-</table>
-${p < PAGE_COUNT - 1 ? '<hr style="border:none;border-bottom:1px dashed #ccc;margin:8px auto;" />' : ''}</div>`);
+</table>`);
   }
 
   const css = `
@@ -166,12 +163,12 @@ ${p < PAGE_COUNT - 1 ? '<hr style="border:none;border-bottom:1px dashed #ccc;mar
 @media print {
   @page { size: A4 portrait; margin: 18mm 16mm 16mm 16mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  table { page-break-inside: auto; }
 }
 body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; background: #fff; }
-hr { page-break-after: avoid; }
 </style>`;
 
-  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('')}</body></html>`);
+  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('\n')}</body></html>`);
   printWindow.document.close();
 
   setTimeout(() => {
