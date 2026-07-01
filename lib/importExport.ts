@@ -78,7 +78,8 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
 
 /**
  * 导出为 A4 可打印 HTML 表格，浏览器「另存为 PDF」或直接打印
- * 每页 40 行数据，包含表头「两江校区后勤物资表」、打印时间、签字栏
+ * 每页 35 行数据，包含表头「两江校区后勤物资表」、页码、签字栏
+ * 去掉页眉页脚的打印时间，仅保留页码；序号列缩到最小宽度；表格居中
  */
 export function printMaterials(data: any[]): void {
   if (!data || data.length === 0) {
@@ -92,76 +93,64 @@ export function printMaterials(data: any[]): void {
     return;
   }
 
-  const NOW = new Date();
-  const PRINT_TIME = NOW.getFullYear() + '年'
-    + String(NOW.getMonth() + 1).padStart(2, '0') + '月'
-    + String(NOW.getDate()).padStart(2, '0') + '日 '
-    + String(NOW.getHours()).padStart(2, '0') + ':'
-    + String(NOW.getMinutes()).padStart(2, '0');
-
-  const ROWS_PER_PAGE = 40;
+  const ROWS_PER_PAGE = 35;
   const PAGE_COUNT = Math.ceil(data.length / ROWS_PER_PAGE);
 
   const cols = [
-    { label: '序号', key: '_idx' },
-    { label: '物资编码', key: 'code' },
-    { label: '物资名称', key: 'name' },
-    { label: '规格型号', key: 'specification' },
-    { label: '单位', key: 'unit' },
+    { label: '序号', key: '_idx', minWidth: 36 },   // 足够放下 3 位数 + 边距
+    { label: '物资编码', key: 'code', minWidth: 80 },
+    { label: '物资名称', key: 'name', minWidth: 120 },
+    { label: '规格型号', key: 'specification', minWidth: 100 },
+    { label: '单位', key: 'unit', minWidth: 40 },
   ];
+  const TOTAL_COL_WIDTHS = cols.reduce((s, c) => s + c.minWidth, 0); // 456
 
   let htmlParts: string[] = [];
 
   for (let page = 0; page < PAGE_COUNT; page++) {
     const slice = data.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);
-    const rowNum = page + 1;
+    const pageNum = page + 1;
 
     htmlParts.push(`
-<table style="width:100%;border-collapse:collapse;margin-bottom:0;">
-  <thead>
-    <tr>
-      <th colspan="${cols.length}" style="text-align:center;font-size:18px;font-weight:bold;padding:8px 0;border:none;">
-        两江校区后勤物资表
-      </th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style="border:none;text-align:right;padding:4px 0;font-size:12px;color:#666;">
-        打印时间：${PRINT_TIME}&ensp;&nbsp;&nbsp;第 ${rowNum}/${PAGE_COUNT} 页
-      </td>
-    </tr>
-    <tr style="background:#f0f0f0;">
-      ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
-    </tr>
-    ${slice.map((row: any, i: number) => `
-    <tr>
-      ${cols.map(c => {
-        const val = c.key === '_idx' ? (i + 1 + page * ROWS_PER_PAGE) : (row[c.key] ?? '-');
-        return `<td style="border:1px solid #333;padding:4px;font-size:12px;text-align:center;">${val}</td>`;
-      }).join('')}
-    </tr>`).join('')}
-    <tr style="height:30px;"><td colspan="${cols.length}" style="border:none;"></td></tr>
-    <tr>
-      <td colspan="${cols.length}" style="border:none;padding:8px 4px;">
-        <table style="width:100%;font-size:13px;border-collapse:collapse;">
-          <tr>
-            <td style="border-top:1px solid #000;padding:8px 0;white-space:nowrap;width:33%;">经办人：________________</td>
-            <td style="border-top:1px solid #000;padding:8px 0;white-space:nowrap;width:33%;">审核人：________________</td>
-            <td style="border-top:1px solid #000;padding:8px 0;white-space:nowrap;width:34%;">分管领导签字：________________</td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-    <tr style="page-break-after:always;"><td colspan="${cols.length}" style="height:10px;border:none;"></td></tr>
-  </tbody>
-</table>`);
+<div style="page-break-after:always; text-align:center; margin-bottom:0;">
+<table style="margin:auto; border-collapse:collapse; width:${TOTAL_COL_WIDTHS}px; table-layout:fixed;">
+  <caption style="font-size:18px; font-weight:bold; padding:8px 0; margin-bottom:4px;">
+    两江校区后勤物资表
+  </caption>
+  <tr style="background:#f0f0f0;">
+    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;min-width:${c.minWidth}px;">${c.label}</th>`).join('')}
+  </tr>
+  ${slice.map((row: any, i: number) => `
+  <tr>
+    ${cols.map(c => {
+      const val = c.key === '_idx' ? (i + 1 + page * ROWS_PER_PAGE) : (row[c.key] ?? '-');
+      return `<td style="border:1px solid #333;padding:4px;font-size:12px;text-align:center;overflow:hidden;text-overflow:ellipsis;">${val}</td>`;
+    }).join('')}
+  </tr>`).join('')}
+  <tr><td colspan="${cols.length}" style="border:none;height:20px;"></td></tr>
+  <tr>
+    <td colspan="${cols.length}" style="border:none;padding:6px 4px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;border-top:1px solid #000;">
+        <tr>
+          <td style="padding:6px 0;white-space:nowrap;width:33.33%;">经办人：________________</td>
+          <td style="padding:6px 0;white-space:nowrap;width:33.33%;">审核人：________________</td>
+          <td style="padding:6px 0;white-space:nowrap;width:33.34%;">分管领导签字：________________</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr style="font-size:11px;color:#666;">
+    <td colspan="${cols.length}" style="border:none;text-align:right;padding:2px 4px;">第 ${pageNum} / ${PAGE_COUNT} 页</td>
+  </tr>
+</table>
+</div>`);
   }
 
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 14mm 12mm 16mm 12mm; }
+  @page { size: A4 portrait; margin: 12mm 14mm 18mm 14mm; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; }
 </style>`;
@@ -169,7 +158,6 @@ body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; }
   printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body>${htmlParts.join('')}</body></html>`);
   printWindow.document.close();
 
-  // 自动触发打印对话框
   setTimeout(() => {
     printWindow.print();
   }, 600);
