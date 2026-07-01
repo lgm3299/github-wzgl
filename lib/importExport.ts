@@ -148,10 +148,10 @@ export function printMaterials(data: any[]): void {
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 14mm 14mm 18mm 14mm; }
+  @page { size: A4 portrait; margin: 0; }
   body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
-body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 20px; }
+body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; }
 </style>`;
 
   printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body>${htmlContent}</body></html>`);
