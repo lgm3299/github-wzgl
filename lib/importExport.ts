@@ -187,6 +187,88 @@ export interface CsvColumn {
 }
 
 /**
+ * 下载 Excel 兼容的 HTML 表格（.xls 格式，可直接用 Excel 打开编辑）
+ * 含表头「两江校区后勤物资表」、打印时间、签字栏，与打印版保持一致风格
+ */
+export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: string): void {
+  if (!data || data.length === 0) {
+    console.warn('[exportTableAsHTML] 数据为空，无需导出');
+    return;
+  }
+  if (!columns || columns.length === 0) {
+    console.error('[exportTableAsHTML] columns 不能为空');
+    throw new Error('导出列定义不能为空');
+  }
+  if (!filename) {
+    console.error('[exportTableAsHTML] filename 不能为空');
+    throw new Error('文件名不能为空');
+  }
+
+  try {
+    const NOW = new Date();
+    const PRINT_TIME = NOW.getFullYear() + '年'
+      + String(NOW.getMonth() + 1).padStart(2, '0') + '月'
+      + String(NOW.getDate()).padStart(2, '0') + '日 '
+      + String(NOW.getHours()).padStart(2, '0') + ':'
+      + String(NOW.getMinutes()).padStart(2, '0');
+
+    const cols = [
+      { label: '序号', key: '_idx' },
+      ...columns,
+    ];
+
+    let rowsHtml = '';
+    data.forEach((row: any, i: number) => {
+      rowsHtml += `<tr height="22">`;
+      cols.forEach(c => {
+        const val = c.key === '_idx' ? (i + 1) : (row[c.key] ?? '-');
+        rowsHtml += `<td style="border:1px solid #333;padding:2px 4px;font-size:11px;text-align:center;">${val}</td>`;
+      });
+      rowsHtml += `</tr>`;
+    });
+
+    const colSpan = cols.length;
+
+    const htmlContent = `
+<table style="width:100%; border-collapse:collapse; border:1px solid #333; table-layout:fixed; font-family:'SimSun',宋体,serif;">
+  <tr>
+    <td colspan="${colSpan}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:10px 0;background:#fff;">
+      两江校区后勤物资表
+    </td>
+  </tr>
+  <tr>
+    <td colspan="${colSpan}" style="border:none;font-size:12px;text-align:right;padding:4px 8px;background:#fff;">
+      导出时间：${PRINT_TIME}
+    </td>
+  </tr>
+  <tr style="background:#d9e8f7;font-weight:bold;">
+    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
+  </tr>
+  ${rowsHtml}
+  <tr><td colspan="${colSpan}" style="border:none;height:10px;background:#fff;"></td></tr>
+  <tr>
+    <td colspan="${colSpan}" style="border:1px solid #333;padding:6px 8px;background:#fff;">
+      <table style="width:100%;font-size:12px;border-collapse:collapse;">
+        <tr>
+          <td style="padding:4px 0;white-space:nowrap;width:33.33%;">经办人：________________</td>
+          <td style="padding:4px 0;white-space:nowrap;width:33.33%;">审核人：________________</td>
+          <td style="padding:4px 0;white-space:nowrap;width:33.34%;">分管领导签字：________________</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
+    // 生成带 BOM 的 HTML 表格，Excel 可直接打开编辑
+    const blob = new Blob(['<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' + htmlContent + '</html>'], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    safeDownload(blob, `${filename}.xls`);
+  } catch (error) {
+    console.error('[exportTableAsHTML] 导出失败:', error);
+    throw error;
+  }
+}
+
+/**
  * 下载 CSV 模板（空模板，仅含表头）
  */
 export function downloadTemplate(columns: CsvColumn[], filename: string): void {

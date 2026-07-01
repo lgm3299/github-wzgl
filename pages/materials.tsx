@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, DatePicker, Upload, Alert } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UploadOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getMaterials, getCategories, getSuppliers, createMaterial, updateMaterial, deleteMaterial, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate, printMaterials, csvToObjects } from '@/lib/importExport';
+import { downloadCSV, downloadTemplate, exportTableAsHTML, printMaterials, csvToObjects } from '@/lib/importExport';
 
 const { Title } = Typography;
 
