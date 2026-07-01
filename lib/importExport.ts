@@ -78,8 +78,8 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
 
 /**
  * 导出为 A4 可打印 HTML 表格，浏览器「另存为 PDF」或直接打印
- * 每页 35 行数据，包含表头「两江校区后勤物资表」、页码、签字栏
- * 去掉页眉页脚的打印时间，仅保留页码；序号列缩到最小宽度；表格居中
+ * 每页 35 行数据，包含表头「两江校区后勤物资表」、签字栏
+ * 页眉页脚均不显示（@page margin 设为 0）；表格宽度自动撑满可用区域，列宽按比例分配
  */
 export function printMaterials(data: any[]): void {
   if (!data || data.length === 0) {
@@ -97,41 +97,40 @@ export function printMaterials(data: any[]): void {
   const PAGE_COUNT = Math.ceil(data.length / ROWS_PER_PAGE);
 
   const cols = [
-    { label: '序号', key: '_idx', minWidth: 36 },   // 足够放下 3 位数 + 边距
-    { label: '物资编码', key: 'code', minWidth: 80 },
-    { label: '物资名称', key: 'name', minWidth: 120 },
-    { label: '规格型号', key: 'specification', minWidth: 100 },
-    { label: '单位', key: 'unit', minWidth: 40 },
+    { label: '序号', key: '_idx' },
+    { label: '物资编码', key: 'code' },
+    { label: '物资名称', key: 'name' },
+    { label: '规格型号', key: 'specification' },
+    { label: '单位', key: 'unit' },
   ];
-  const TOTAL_COL_WIDTHS = cols.reduce((s, c) => s + c.minWidth, 0); // 456
 
   let htmlParts: string[] = [];
 
   for (let page = 0; page < PAGE_COUNT; page++) {
     const slice = data.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);
-    const pageNum = page + 1;
 
     htmlParts.push(`
-<div style="page-break-after:always; text-align:center; margin-bottom:0;">
-<table style="margin:auto; border-collapse:collapse; width:${TOTAL_COL_WIDTHS}px; table-layout:fixed;">
-  <caption style="font-size:18px; font-weight:bold; padding:8px 0; margin-bottom:4px;">
+<div style="page-break-after:always; margin-bottom:0;">
+<table style="width:100%; border-collapse:collapse; border:1px solid #333; table-layout:fixed;">
+  <caption style="font-size:18px; font-weight:bold; padding:10px 0; text-align:center; border:none;">
     两江校区后勤物资表
   </caption>
-  <tr style="background:#f0f0f0;">
-    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;min-width:${c.minWidth}px;">${c.label}</th>`).join('')}
+  <tr style="background:#e8e8e8;">
+    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
   </tr>
   ${slice.map((row: any, i: number) => `
-  <tr>
-    ${cols.map(c => {
+  <tr style="height:22px;">
+    ${cols.map((c, ci) => {
       const val = c.key === '_idx' ? (i + 1 + page * ROWS_PER_PAGE) : (row[c.key] ?? '-');
-      return `<td style="border:1px solid #333;padding:4px;font-size:12px;text-align:center;overflow:hidden;text-overflow:ellipsis;">${val}</td>`;
+      // 第 0 列序号最窄，其余按比例分配
+      return `<td style="border:1px solid #333;padding:2px 4px;font-size:12px;text-align:center;overflow:hidden;text-overflow:ellipsis;">${val}</td>`;
     }).join('')}
   </tr>`).join('')}
-  <tr><td colspan="${cols.length}" style="border:none;height:20px;"></td></tr>
+  <tr><td colspan="${cols.length}" style="border:none;height:10px;"></td></tr>
   <tr>
-    <td colspan="${cols.length}" style="border:none;padding:6px 4px;">
-      <table style="width:100%;font-size:13px;border-collapse:collapse;border-top:1px solid #000;">
-        <tr>
+    <td colspan="${cols.length}" style="border:1px solid #333;padding:8px 4px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <tr style="border-top:1px solid #000;">
           <td style="padding:6px 0;white-space:nowrap;width:33.33%;">经办人：________________</td>
           <td style="padding:6px 0;white-space:nowrap;width:33.33%;">审核人：________________</td>
           <td style="padding:6px 0;white-space:nowrap;width:33.34%;">分管领导签字：________________</td>
@@ -139,18 +138,15 @@ export function printMaterials(data: any[]): void {
       </table>
     </td>
   </tr>
-  <tr style="font-size:11px;color:#666;">
-    <td colspan="${cols.length}" style="border:none;text-align:right;padding:2px 4px;">第 ${pageNum} / ${PAGE_COUNT} 页</td>
-  </tr>
-</table>
 </div>`);
   }
 
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 12mm 14mm 18mm 14mm; }
-  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4 portrait; margin: 0; }
+  body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  div[style*="page-break-after"] { padding: 10mm 14mm 14mm 14mm; box-sizing: border-box; }
 }
 body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; }
 </style>`;
