@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, Row, Col, Upload, Divider, DatePicker, Alert, Checkbox } from 'antd';
-import { ReloadOutlined, DownloadOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DownloadOutlined, UploadOutlined, InboxOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getMaterials, getInventories, getCurrentUser, getOutboundOrders, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate } from '@/lib/importExport';
+import { printMaterials, exportTableAsHTML, downloadCSV, downloadTemplate } from '@/lib/importExport';
 
 const { Title } = Typography;
 
@@ -255,6 +255,37 @@ const OutboundPage: React.FC = () => {
     ));
   };
 
+  // 导出为可编辑 Excel（HTML 格式）
+  const handleExport = () => {
+    if (inventory.length === 0) { message.warning('暂无数据可导出'); return; }
+    const exportData = inventory.map((row, i) => ({ ...row, _idx: i + 1 }));
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'code', label: '物资编码' },
+      { key: 'name', label: '物资名称' },
+      { key: 'specification', label: '规格型号' },
+      { key: 'unit', label: '单位' },
+      { key: 'current_quantity', label: '当前库存' },
+    ];
+    exportTableAsHTML(exportData, columns, '出库管理');
+    message.success('导出成功');
+  };
+
+  // 打印
+  const handlePrint = () => {
+    if (inventory.length === 0) { message.warning('暂无数据可打印'); return; }
+    const printData = inventory.map((row, i) => ({ ...row, _idx: i + 1 }));
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'code', label: '物资编码' },
+      { key: 'name', label: '物资名称' },
+      { key: 'specification', label: '规格型号' },
+      { key: 'unit', label: '单位' },
+      { key: 'current_quantity', label: '当前库存' },
+    ];
+    printMaterials(printData, columns, '出库管理');
+  };
+
   const columns = useMemo(() => [
     {
       title: '选择',
@@ -302,6 +333,8 @@ const OutboundPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>出库管理</Title>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => loadInventory()}>刷新</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
           <Button icon={<DownloadOutlined />} onClick={loadHistory}>查看出库历史</Button>
           {selectedRows.length > 0 && (
             <Button type="primary" icon={<InboxOutlined />} onClick={() => setBatchOutboundModalOpen(true)}>

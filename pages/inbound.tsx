@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, Row, Col, Divider, DatePicker, Alert } from 'antd';
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined, SendOutlined, DownloadOutlined, UploadOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined, SendOutlined, DownloadOutlined, UploadOutlined, MinusCircleOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getInboundOrders, createInboundOrder, updateInboundOrderStatus, deleteInboundOrder, approveInboundOrder, getSuppliers, getMaterials, getInventories, getCurrentUser, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate, csvToObjects } from '@/lib/importExport';
+import { downloadCSV, downloadTemplate, csvToObjects, printMaterials, exportTableAsHTML } from '@/lib/importExport';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -233,8 +233,9 @@ const InboundPage: React.FC = () => {
     }
   };
 
-  // 导出（含物资明细）
+  // 导出为可编辑 Excel（HTML 格式）
   const handleExport = () => {
+    if (data.length === 0) { message.warning('暂无数据可导出'); return; }
     const exportData: any[] = [];
     for (const order of data) {
       const orderItems = order.inbound_items || [];
@@ -280,8 +281,59 @@ const InboundPage: React.FC = () => {
       { key: 'remark', label: '备注' },
       { key: 'created_at', label: '创建时间' },
     ];
-    downloadCSV(exportData, columns, '入库记录');
+    exportTableAsHTML(exportData, columns, '入库记录');
     message.success('导出成功');
+  };
+
+  // 打印
+  const handlePrint = () => {
+    if (data.length === 0) { message.warning('暂无数据可打印'); return; }
+    const printData: any[] = [];
+    for (const order of data) {
+      const orderItems = order.inbound_items || [];
+      if (orderItems.length === 0) {
+        printData.push({
+          order_no: order.order_no,
+          supplier_name: order.suppliers?.name || '',
+          operator: order.operator,
+          status: statusMap[order.status]?.text || order.status,
+          material_name: '',
+          material_code: '',
+          unit: '',
+          quantity: '',
+          remark: order.remark || '',
+          created_at: new Date(order.created_at).toLocaleString(),
+        });
+      } else {
+        for (const item of orderItems) {
+          printData.push({
+            order_no: order.order_no,
+            supplier_name: order.suppliers?.name || '',
+            operator: order.operator,
+            status: statusMap[order.status]?.text || order.status,
+            material_name: item.materials?.name || '',
+            material_code: item.materials?.code || '',
+            unit: item.materials?.unit || '',
+            quantity: item.quantity,
+            remark: order.remark || '',
+            created_at: new Date(order.created_at).toLocaleString(),
+          });
+        }
+      }
+    }
+    const columns = [
+      { key: 'order_no', label: '入库单号' },
+      { key: 'supplier_name', label: '供应商' },
+      { key: 'operator', label: '操作人' },
+      { key: 'status', label: '状态' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'material_code', label: '物资编码' },
+      { key: 'unit', label: '单位' },
+      { key: 'quantity', label: '数量' },
+      { key: 'remark', label: '备注' },
+      { key: 'created_at', label: '创建时间' },
+    ];
+    printMaterials(printData, columns, '入库记录');
   };
 
   const handleDownloadTemplate = () => {
@@ -528,6 +580,7 @@ const InboundPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>入库管理</Title>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
           <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>下载模板</Button>
           <Button icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>导入数据</Button>

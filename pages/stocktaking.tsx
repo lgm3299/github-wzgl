@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, DatePicker, Row, Col, Divider, Alert, Steps, Radio, Popconfirm } from 'antd';
-import { PlusOutlined, ReloadOutlined, CheckCircleOutlined, DownloadOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, CheckCircleOutlined, DownloadOutlined, FileTextOutlined, DeleteOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getStocktakingOrders, createStocktakingOrder, updateStocktakingOrder, approveStocktakingOrder, deleteStocktakingOrder, getMaterials, getInventories, getCurrentUser } from '@/lib/supabase';
-import { downloadCSV } from '@/lib/importExport';
+import { printMaterials, exportTableAsHTML, downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
 
@@ -261,19 +261,49 @@ const StocktakingPage: React.FC = () => {
     }
   };
 
-  // 导出盘点数据
+  // 导出盘点数据（HTML 格式 Excel）
   const handleExport = () => {
-    const exportData = data.map(item => ({
-      order_no: item.order_no,
-      material_name: item.material_name,
-      system_quantity: item.system_quantity || '-',
-      actual_quantity: item.material_quantity,
-      difference: item.difference,
-      status: item.status,
-      created_at: item.created_at ? new Date(item.created_at).toLocaleString() : '-',
+    if (data.length === 0) { message.warning('暂无数据可导出'); return; }
+    const exportData = data.map((item, idx) => ({
+      ...item,
+      _idx: idx + 1,
+      status_text: STOCKTAKING_STATUS_MAP[item.status]?.text || item.status,
     }));
-    downloadCSV(exportData, EXPORT_COLUMNS, '盘点记录');
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'order_no', label: '盘点单号' },
+      { key: 'operator', label: '操作人' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'system_quantity', label: '系统库存' },
+      { key: 'material_quantity', label: '实际盘点' },
+      { key: 'difference', label: '差异' },
+      { key: 'status_text', label: '状态' },
+      { key: 'created_at', label: '创建时间' },
+    ];
+    exportTableAsHTML(exportData, columns, '盘点记录');
     message.success('导出成功');
+  };
+
+  // 打印
+  const handlePrint = () => {
+    if (data.length === 0) { message.warning('暂无数据可打印'); return; }
+    const printData = data.map((item, idx) => ({
+      ...item,
+      _idx: idx + 1,
+      status_text: STOCKTAKING_STATUS_MAP[item.status]?.text || item.status,
+    }));
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'order_no', label: '盘点单号' },
+      { key: 'operator', label: '操作人' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'system_quantity', label: '系统库存' },
+      { key: 'material_quantity', label: '实际盘点' },
+      { key: 'difference', label: '差异' },
+      { key: 'status_text', label: '状态' },
+      { key: 'created_at', label: '创建时间' },
+    ];
+    printMaterials(printData, columns, '盘点记录');
   };
 
   // 表格列定义
@@ -333,6 +363,7 @@ const StocktakingPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>盘点管理</Title>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()} loading={loading}>刷新</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setCurrentStep(0); setCreateModalOpen(true); }}>
             创建盘点单

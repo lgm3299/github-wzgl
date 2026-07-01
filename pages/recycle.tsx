@@ -5,10 +5,10 @@ import {
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, ReloadOutlined, CheckOutlined,
-  DownloadOutlined, MinusCircleOutlined, SendOutlined
+  DownloadOutlined, MinusCircleOutlined, SendOutlined, PrinterOutlined
 } from '@ant-design/icons';
 import { getRecycleOrders, createRecycleOrder, updateRecycleOrderStatus, deleteRecycleOrder, getMaterials, getCurrentUser, getAllOutboundQuantities } from '@/lib/supabase';
-import { downloadCSV } from '@/lib/importExport';
+import { printMaterials, exportTableAsHTML, downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -153,6 +153,7 @@ const RecyclePage: React.FC = () => {
   };
 
   const handleExport = () => {
+    if (data.length === 0) { message.warning('暂无数据可导出'); return; }
     const exportData: any[] = [];
     for (const order of data) {
       const orderItems = order.recycle_items || [];
@@ -195,8 +196,55 @@ const RecyclePage: React.FC = () => {
       { key: 'remark', label: '备注' },
       { key: 'created_at', label: '创建时间' },
     ];
-    downloadCSV(exportData, columns, '废旧物资回收记录');
+    exportTableAsHTML(exportData, columns, '废旧物资回收记录');
     message.success('导出成功');
+  };
+
+  const handlePrint = () => {
+    if (data.length === 0) { message.warning('暂无数据可打印'); return; }
+    const printData: any[] = [];
+    for (const order of data) {
+      const orderItems = order.recycle_items || [];
+      if (orderItems.length === 0) {
+        printData.push({
+          order_no: order.order_no,
+          recycler: order.recycler,
+          operator: order.operator,
+          status: RECYCLE_STATUS_MAP[order.status]?.text || order.status,
+          recycle_date: order.recycle_date,
+          material_name: '',
+          quantity: '',
+          remark: order.remark || '',
+          created_at: new Date(order.created_at).toLocaleString(),
+        });
+      } else {
+        for (const item of orderItems) {
+          printData.push({
+            order_no: order.order_no,
+            recycler: order.recycler,
+            operator: order.operator,
+            status: RECYCLE_STATUS_MAP[order.status]?.text || order.status,
+            recycle_date: order.recycle_date,
+            material_name: item.materials?.name || '未知物资',
+            quantity: item.quantity,
+            remark: order.remark || '',
+            created_at: new Date(order.created_at).toLocaleString(),
+          });
+        }
+      }
+    }
+    const columns = [
+      { key: 'order_no', label: '回收单号' },
+      { key: 'recycler', label: '回收人' },
+      { key: 'operator', label: '操作人' },
+      { key: 'status', label: '状态' },
+      { key: 'recycle_date', label: '回收日期' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'quantity', label: '数量' },
+      { key: 'remark', label: '备注' },
+      { key: 'created_at', label: '创建时间' },
+    ];
+    printMaterials(printData, columns, '废旧物资回收记录');
   };
 
   const statusMap = RECYCLE_STATUS_MAP;
@@ -306,6 +354,7 @@ const RecyclePage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>废旧物资回收</Title>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增回收单</Button>
         </Space>

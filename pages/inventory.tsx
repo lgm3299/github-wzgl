@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Table, Tag, Typography, Button, Space, message, DatePicker, Select, Alert } from 'antd';
-import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DownloadOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getInventories, getCategories } from '@/lib/supabase';
-import { downloadCSV } from '@/lib/importExport';
+import { printMaterials, exportTableAsHTML, downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -60,22 +60,51 @@ const InventoryPage: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  // 导出库存数据
+  // 导出库存数据（HTML 格式 Excel）
   const handleExport = () => {
-    try {
-      const exportData = data.map(item => ({
-        code: item.material?.code || '',
-        name: item.material?.name || '',
-        category: item.material?.categories?.name || '',
-        quantity: item.quantity,
-        updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
-      }));
-      downloadCSV(exportData, EXPORT_COLUMNS, '库存数据');
-      message.success('导出成功');
-    } catch (error: any) {
-      console.error('导出失败:', error);
-      message.error('导出失败: ' + (error.message || '未知错误'));
-    }
+    if (data.length === 0) { message.warning('暂无数据可导出'); return; }
+    const exportData = data.map((item, i) => ({
+      ...item,
+      _idx: i + 1,
+      material_code: item.material?.code || '',
+      material_name: item.material?.name || '',
+      category: item.material?.categories?.name || '',
+      quantity: item.quantity,
+      updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
+    }));
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'material_code', label: '物资编码' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'category', label: '分类' },
+      { key: 'quantity', label: '当前库存' },
+      { key: 'updated_at', label: '更新时间' },
+    ];
+    exportTableAsHTML(exportData, columns, '库存管理');
+    message.success('导出成功');
+  };
+
+  // 打印
+  const handlePrint = () => {
+    if (data.length === 0) { message.warning('暂无数据可打印'); return; }
+    const printData = data.map((item, i) => ({
+      ...item,
+      _idx: i + 1,
+      material_code: item.material?.code || '',
+      material_name: item.material?.name || '',
+      category: item.material?.categories?.name || '',
+      quantity: item.quantity,
+      updated_at: item.updated_at ? new Date(item.updated_at).toLocaleString() : '-',
+    }));
+    const columns = [
+      { key: '_idx', label: '序号' },
+      { key: 'material_code', label: '物资编码' },
+      { key: 'material_name', label: '物资名称' },
+      { key: 'category', label: '分类' },
+      { key: 'quantity', label: '当前库存' },
+      { key: 'updated_at', label: '更新时间' },
+    ];
+    printMaterials(printData, columns, '库存管理');
   };
 
   const columns = [
@@ -136,6 +165,7 @@ const InventoryPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>库存管理</Title>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>刷新</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
         </Space>
       </div>

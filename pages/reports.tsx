@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Typography, Card, Row, Col, Statistic, Spin, message, Table, DatePicker, Button, Tag } from 'antd';
-import { DatabaseOutlined, ImportOutlined, ExportOutlined, BarChartOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ImportOutlined, ExportOutlined, BarChartOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getDashboardStats, getOutboundUsageStats } from '@/lib/supabase';
-import { downloadCSV } from '@/lib/importExport';
+import { printMaterials, exportTableAsHTML, downloadCSV } from '@/lib/importExport';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -54,14 +54,32 @@ const ReportsPage: React.FC = () => {
       message.warning('没有数据可导出');
       return;
     }
+    const exportData = usageData.map((item, idx) => ({ ...item, _idx: idx + 1 }));
     const columns = [
+      { key: '_idx', label: '排名' },
       { key: 'code', label: '物资编码' },
       { key: 'name', label: '物资名称' },
       { key: 'unit', label: '单位' },
       { key: 'total_quantity', label: '消耗数量' },
     ];
-    downloadCSV(usageData, columns, '物资用量统计');
+    exportTableAsHTML(exportData, columns, '物资用量统计');
     message.success('导出成功');
+  };
+
+  const handlePrintUsage = () => {
+    if (usageData.length === 0) {
+      message.warning('没有数据可打印');
+      return;
+    }
+    const printData = usageData.map((item, idx) => ({ ...item, _idx: idx + 1 }));
+    const columns = [
+      { key: '_idx', label: '排名' },
+      { key: 'code', label: '物资编码' },
+      { key: 'name', label: '物资名称' },
+      { key: 'unit', label: '单位' },
+      { key: 'total_quantity', label: '消耗数量' },
+    ];
+    printMaterials(printData, columns, '物资用量统计');
   };
 
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '200px auto' }} />;
@@ -104,6 +122,7 @@ const ReportsPage: React.FC = () => {
           <Button type="primary" icon={<BarChartOutlined />} onClick={fetchUsageStats} loading={usageLoading}>
             查询用量
           </Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrintUsage} disabled={usageData.length === 0}>打印</Button>
           <Button icon={<ExportOutlined />} onClick={handleExportUsage} disabled={usageData.length === 0}>
             导出用量
           </Button>
