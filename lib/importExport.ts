@@ -78,9 +78,8 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
 
 /**
  * 导出为 A4 可打印 HTML 表格，浏览器「另存为 PDF」或直接打印
- * 表头「两江校区后勤物资表」、打印时间（自动生成）、签字栏
- * 页眉页脚由浏览器自带，用 @page margin 控制左右上下边距
- * 数据按每页 ~30 行分块，每块均有完整表头
+ * 表头「两江校区后勤物资表」、打印时间（另起一行）、签字栏
+ * 页眉页脚强制隐藏；数据按每页 30 行分块，每页均有完整表头和底部签名栏
  */
 export function printMaterials(data: any[]): void {
   if (!data || data.length === 0) {
@@ -116,7 +115,6 @@ export function printMaterials(data: any[]): void {
 
   for (let p = 0; p < PAGE_COUNT; p++) {
     const slice = data.slice(p * ROWS_PER_PAGE, (p + 1) * ROWS_PER_PAGE);
-    const pageNum = p + 1;
 
     const rowsHtml = slice.map((row: any, i: number) => {
       const globalIdx = i + p * ROWS_PER_PAGE + 1;
@@ -130,19 +128,25 @@ export function printMaterials(data: any[]): void {
     }).join('');
 
     pages.push(`
-<table style="width:100%; border-collapse:collapse; border-top:2px solid #000; border-bottom:2px solid #000; margin-bottom:6px; table-layout:fixed;">
+<table style="width:100%; border-collapse:collapse; border:1px solid #333; table-layout:fixed;">
   <tr>
-    <td style="border:none;font-size:16px;font-weight:bold;text-align:center;padding:6px 0;">两江校区后勤物资表</td>
-    <td style="border:none;font-size:11px;text-align:right;padding:6px 4px;color:#666;">打印时间：${PRINT_TIME}</td>
+    <td colspan="${cols.length}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:8px 0;">
+      两江校区后勤物资表
+    </td>
+  </tr>
+  <tr>
+    <td colspan="${cols.length}" style="border:none;font-size:12px;text-align:right;padding:4px 8px;">
+      打印时间：${PRINT_TIME}
+    </td>
   </tr>
   <tr style="background:#d9e8f7;">
     ${cols.map(c => `<th style="border:1px solid #333;padding:5px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
   </tr>
   ${rowsHtml}
-  <tr><td colspan="${cols.length}" style="border:none;height:6px;"></td></tr>
+  <tr><td colspan="${cols.length}" style="border:none;height:8px;"></td></tr>
   <tr>
     <td colspan="${cols.length}" style="border:1px solid #333;padding:4px 6px;">
-      <table style="width:100%;font-size:12px;border-collapse:collapse;border-top:1px solid #000;">
+      <table style="width:100%;font-size:12px;border-collapse:collapse;">
         <tr>
           <td style="padding:4px 0;white-space:nowrap;width:33.33%;">经办人：________________</td>
           <td style="padding:4px 0;white-space:nowrap;width:33.33%;">审核人：________________</td>
@@ -151,22 +155,22 @@ export function printMaterials(data: any[]): void {
       </table>
     </td>
   </tr>
-  <tr><td style="border:none;font-size:11px;color:#999;text-align:right;padding:2px 4px;">— ${pageNum} / ${PAGE_COUNT} —</td></tr>
-</table>`);
+</table>
+${p < PAGE_COUNT - 1 ? '<div style="page-break-after:always;"></div>' : ''}`);
   }
 
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 18mm 16mm 16mm 16mm; }
-  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  table { page-break-inside: auto; }
-  tr    { page-break-inside: avoid; page-break-after: auto; }
+  @page { size: A4 portrait; margin: 14mm 14mm 14mm 14mm; }
+  @page :first { margin-top: 14mm; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
-body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 24px 16px; background: #fff; }
+body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; background: #fff; }
+table { page-break-inside: avoid; }
 </style>`;
 
-  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body>${pages.join('\n')}${PAGE_COUNT > 1 ? '<div style="page-break-after:always;"></div>' : ''}</body></html>`);
+  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('\n')}</body></html>`);
   printWindow.document.close();
 
   setTimeout(() => {
