@@ -162,11 +162,11 @@ ${p < PAGE_COUNT - 1 ? '<div style="page-break-after:always;"></div>' : ''}`);
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: A4 portrait; margin: 18mm 16mm 16mm 16mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
-body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; background: #fff; }
-table { page-break-inside: avoid; }
+body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 20px 16px; background: #fff; }
+table { page-break-inside: auto; }
 </style>`;
 
   printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('\n')}</body></html>`);
