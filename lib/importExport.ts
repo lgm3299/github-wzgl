@@ -79,7 +79,7 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
 /**
  * 导出为 A4 可打印 HTML 表格，浏览器「另存为 PDF」或直接打印
  * 表头「两江校区后勤物资表」、打印时间（另起一行）、签字栏
- * 页眉页脚强制隐藏；数据按每页 30 行分块，每页均有完整表头和底部签名栏
+ * @page margin 0 完全去掉浏览器页眉页脚；数据每页 35 行，每页均有完整表头和签名栏
  */
 export function printMaterials(data: any[]): void {
   if (!data || data.length === 0) {
@@ -100,7 +100,7 @@ export function printMaterials(data: any[]): void {
     + String(NOW.getHours()).padStart(2, '0') + ':'
     + String(NOW.getMinutes()).padStart(2, '0');
 
-  const ROWS_PER_PAGE = 30;
+  const ROWS_PER_PAGE = 35;
   const PAGE_COUNT = Math.ceil(data.length / ROWS_PER_PAGE);
 
   const cols = [
@@ -162,8 +162,7 @@ ${p < PAGE_COUNT - 1 ? '<div style="page-break-after:always;"></div>' : ''}`);
   const css = `
 <style>
 @media print {
-  @page { size: A4 portrait; margin: 14mm 14mm 14mm 14mm; }
-  @page :first { margin-top: 14mm; }
+  @page { size: A4 portrait; margin: 0; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; background: #fff; }
