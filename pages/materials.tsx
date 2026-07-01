@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Typography, Popconfirm, DatePicker, Upload, Alert } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UploadOutlined, PrinterOutlined } from '@ant-design/icons';
 import { getMaterials, getCategories, getSuppliers, createMaterial, updateMaterial, deleteMaterial, supabase } from '@/lib/supabase';
-import { downloadCSV, downloadTemplate, csvToObjects } from '@/lib/importExport';
+import { downloadCSV, downloadTemplate, printMaterials, csvToObjects } from '@/lib/importExport';
 
 const { Title } = Typography;
 
@@ -209,10 +209,33 @@ const MaterialsPage: React.FC = () => {
     }
   };
 
-  // 导出物资数据
+  // 导出物资数据（CSV）
   const handleExport = () => {
+    if (data.length === 0) {
+      message.warning('暂无数据可导出');
+      return;
+    }
     downloadCSV(data, EXPORT_COLUMNS, '物资档案');
     message.success('导出成功');
+  };
+
+  // 打印物资数据（A4 可打印表格）
+  const handlePrint = async () => {
+    setLoading(true);
+    try {
+      // 打印需要获取全部数据，不受当前分页限制
+      const result = await getMaterials({ pageSize: 10000 });
+      const allData = result?.data || [];
+      if (allData.length === 0) {
+        message.warning('暂无数据可打印');
+        return;
+      }
+      printMaterials(allData);
+    } catch {
+      message.error('打印失败');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // 下载导入模板
@@ -305,6 +328,7 @@ const MaterialsPage: React.FC = () => {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出数据</Button>
+          <Button icon={<PrinterOutlined />} onClick={handlePrint}>打印物资表</Button>
           <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>下载模板</Button>
           <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportModalOpen(true)}>导入数据</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增物资</Button>
