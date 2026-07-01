@@ -213,16 +213,20 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
       + String(NOW.getMinutes()).padStart(2, '0');
 
     const cols = [
-      { label: '序号', key: '_idx' },
-      ...columns,
+      { label: '序号', key: '_idx', width: 50 },
+      { label: '物资编码', key: 'code', width: 100 },
+      { label: '物资名称', key: 'name', width: 200 },
+      { label: '规格型号', key: 'specification', width: 150 },
+      { label: '单位', key: 'unit', width: 50 },
     ];
+    const TOTAL_WIDTH = cols.reduce((s, c) => s + c.width, 0); // 550
 
     let rowsHtml = '';
     data.forEach((row: any, i: number) => {
       rowsHtml += `<tr height="22">`;
       cols.forEach(c => {
         const val = c.key === '_idx' ? (i + 1) : (row[c.key] ?? '-');
-        rowsHtml += `<td style="border:1px solid #333;padding:2px 4px;font-size:11px;text-align:center;">${val}</td>`;
+        rowsHtml += `<td style="border:1px solid #333;padding:2px 4px;font-size:11px;text-align:center;width:${c.width}px;">${val}</td>`;
       });
       rowsHtml += `</tr>`;
     });
@@ -230,7 +234,7 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
     const colSpan = cols.length;
 
     const htmlContent = `
-<table style="width:100%; border-collapse:collapse; border:1px solid #333; table-layout:fixed; font-family:'SimSun',宋体,serif;">
+<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; border:1px solid #333; font-family:'SimSun',宋体,serif; margin:0 auto;">
   <tr>
     <td colspan="${colSpan}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:10px 0;background:#fff;">
       两江校区后勤物资表
@@ -242,7 +246,7 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
     </td>
   </tr>
   <tr style="background:#d9e8f7;font-weight:bold;">
-    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;">${c.label}</th>`).join('')}
+    ${cols.map(c => `<th style="border:1px solid #333;padding:6px 4px;font-size:12px;text-align:center;width:${c.width}px;">${c.label}</th>`).join('')}
   </tr>
   ${rowsHtml}
   <tr><td colspan="${colSpan}" style="border:none;height:10px;background:#fff;"></td></tr>
