@@ -209,13 +209,16 @@ const MaterialsPage: React.FC = () => {
     }
   };
 
-  // 导出物资数据（CSV）
+  // 导出物资数据（HTML表格，可用Excel打开编辑）
   const handleExport = () => {
     if (data.length === 0) {
       message.warning('暂无数据可导出');
       return;
     }
-    downloadCSV(data, EXPORT_COLUMNS, '物资档案');
+    // 加上序号列
+    const exportData = data.map((row, i) => ({ ...row, _idx: i + 1 }));
+    const exportCols = [{ key: '_idx', label: '序号' }, ...EXPORT_COLUMNS];
+    exportTableAsHTML(exportData, exportCols, '物资档案');
     message.success('导出成功');
   };
 
