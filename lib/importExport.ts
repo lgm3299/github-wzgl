@@ -78,7 +78,7 @@ function rowToCsvRow(row: any[], columns: { key: string; label: string }[]): str
 
 /**
  * 导出为 A4 可打印 HTML 表格，浏览器「另存为 PDF」或直接打印
- * 表头「两江校区后勤物资表」、打印时间（另起一行）、签字栏
+ * 表头「两江校区后勤物资表」（无边框）、打印时间（另起一行）、签字栏
  * @page margin 0 完全去掉浏览器页眉页脚；数据每页 35 行，每页均有完整表头和签名栏
  */
 export function printMaterials(data: any[]): void {
@@ -110,6 +110,7 @@ export function printMaterials(data: any[]): void {
     { label: '规格型号', key: 'specification' },
     { label: '单位', key: 'unit' },
   ];
+  const TOTAL_WIDTH = 550;
 
   let pages: string[] = [];
 
@@ -128,7 +129,8 @@ export function printMaterials(data: any[]): void {
     }).join('');
 
     pages.push(`
-<table style="width:100%; border-collapse:collapse; border:1px solid #333; table-layout:fixed;">
+<div style="page-break-after:always; margin-bottom:0;">
+<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; margin:0 auto;">
   <tr>
     <td colspan="${cols.length}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:8px 0;">
       两江校区后勤物资表
@@ -156,7 +158,7 @@ export function printMaterials(data: any[]): void {
     </td>
   </tr>
 </table>
-${p < PAGE_COUNT - 1 ? '<div style="page-break-after:always;"></div>' : ''}`);
+${p < PAGE_COUNT - 1 ? '<hr style="border:none;border-bottom:1px dashed #ccc;margin:8px auto;" />' : ''}</div>`);
   }
 
   const css = `
@@ -165,11 +167,11 @@ ${p < PAGE_COUNT - 1 ? '<div style="page-break-after:always;"></div>' : ''}`);
   @page { size: A4 portrait; margin: 18mm 16mm 16mm 16mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
-body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 20px 16px; background: #fff; }
-table { page-break-inside: auto; }
+body { font-family: "SimSun", "宋体", serif; margin: 0; padding: 0; background: #fff; }
+hr { page-break-after: avoid; }
 </style>`;
 
-  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('\n')}</body></html>`);
+  printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>两江校区后勤物资表</title>${css}</head><body style="margin:0;padding:0;">${pages.join('')}</body></html>`);
   printWindow.document.close();
 
   setTimeout(() => {
@@ -234,7 +236,7 @@ export function exportTableAsHTML(data: any[], columns: CsvColumn[], filename: s
     const colSpan = cols.length;
 
     const htmlContent = `
-<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; border:1px solid #333; font-family:'SimSun',宋体,serif; margin:0 auto;">
+<table style="width:${TOTAL_WIDTH}px; border-collapse:collapse; font-family:'SimSun',宋体,serif; margin:0 auto;">
   <tr>
     <td colspan="${colSpan}" style="border:none;font-size:18px;font-weight:bold;text-align:center;padding:10px 0;background:#fff;">
       两江校区后勤物资表
